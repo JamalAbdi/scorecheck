@@ -21,3 +21,18 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+pip-log.txt
+*.egg-info/
+dist/
+build/
