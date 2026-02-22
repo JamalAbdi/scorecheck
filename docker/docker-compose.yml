@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend/Dockerfile
+    container_name: scorecheck-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SPORTS_DATA_SOURCE=thesportsdb
+      # Optionally set these for API-Sports support:
+      # - APISPORTS_KEY=your_key_here
+      # - APISPORTS_SEASON=2024
+      # - APISPORTS_NBA_SEASON=2024
+      # - APISPORTS_NHL_SEASON=2024
+      # - APISPORTS_MLB_SEASON=2024
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - scorecheck-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+    container_name: scorecheck-frontend
+    ports:
+      - "8080:8080"
+    environment:
+      - VUE_APP_API_URL=http://backend:8000/api
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - scorecheck-network
+    restart: unless-stopped
+
+networks:
+  scorecheck-network:
+    driver: bridge

@@ -1,10 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
 
-from api_sports import ApiSportsBaseConnector, ApiSportsError
+from sports_data.api_sports import ApiSportsConnector, ApiSportsError
+from sports_data.thesportsdb import TheSportsDBConnector
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 app = FastAPI(title="Scorecheck API")
 
@@ -18,6 +23,12 @@ app.add_middleware(
 
 APISPORTS_KEY = os.environ.get("APISPORTS_KEY", "").strip()
 DEFAULT_SEASON = os.environ.get("APISPORTS_SEASON", "2024").strip()
+SPORTS_DATA_SOURCE = os.environ.get("SPORTS_DATA_SOURCE", "thesportsdb").lower()
+
+if not APISPORTS_KEY:
+    logger.warning("APISPORTS_KEY not set. Using fallback static data.")
+else:
+    logger.info("APISPORTS_KEY is configured.")
 
 TEAM_CONFIG: Dict[str, Dict[str, str]] = {
     "raptors": {
@@ -52,11 +63,25 @@ def _get_season(team_key: str) -> str:
     return os.environ.get(env_key, DEFAULT_SEASON)
 
 
-def _connector_for(team_key: str) -> ApiSportsBaseConnector:
-    return ApiSportsBaseConnector(
-        APISPORTS_KEY,
-        base_url=TEAM_CONFIG[team_key]["base_url"],
-    )
+def _connector_for(team_key: str):
+    if SPORTS_DATA_SOURCE == "fallback":
+        return None  # Use fallback data
+    elif SPORTS_DATA_SOURCE == "thesportsdb":
+        # TheSportsDB supports NHL, MLB, Soccer but NOT NBA
+        if TEAM_CONFIG[team_key]["league"] == "NBA":
+            # NBA teams must use API-Sports
+            if not APISPORTS_KEY:
+                raise ApiSportsError(f"API-Sports key required for NBA teams. TheSportsDB does not support NBA.")
+            return ApiSportsConnector(
+                APISPORTS_KEY,
+                base_url=TEAM_CONFIG[team_key]["base_url"],
+            )
+        return TheSportsDBConnector()
+    else:
+        return ApiSportsConnector(
+            APISPORTS_KEY,
+            base_url=TEAM_CONFIG[team_key]["base_url"],
+        )
 
 
 def _extract_team(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -179,14 +204,67 @@ def _extract_games(data: Dict[str, Any], team_name: str) -> List[Dict[str, Any]]
 
 def _fallback_team(team_id: str) -> Dict[str, Any]:
     config = TEAM_CONFIG[team_id]
-    return {
+    
+    # Static fallback data with players and games
+    fallback_data = {
+        "raptors": {
+            "id": team_id,
+            "name": "Toronto Raptors",
+            "league": "NBA",
+            "players": [
+                {"name": "Scottie Barnes", "position": "F", "stats": {"points": 19.5, "rebounds": 8.1, "assists": 6.2}},
+                {"name": "RJ Barrett", "position": "G", "stats": {"points": 18.1, "rebounds": 5.4, "assists": 3.1}},
+                {"name": "Immanuel Quickley", "position": "G", "stats": {"points": 17.2, "rebounds": 4.3, "assists": 5.9}},
+            ],
+            "games": [
+                {"date": "2026-02-10", "opponent": "Boston Celtics", "home": True, "status": "played", "score": "112-105"},
+                {"date": "2026-02-13", "opponent": "Miami Heat", "home": False, "status": "played", "score": "98-101"},
+                {"date": "2026-02-25", "opponent": "Chicago Bulls", "home": True, "status": "upcoming", "score": None},
+            ],
+            "source": "static",
+        },
+        "maple-leafs": {
+            "id": team_id,
+            "name": "Toronto Maple Leafs",
+            "league": "NHL",
+            "players": [
+                {"name": "Auston Matthews", "position": "C", "stats": {"goals": 42, "assists": 28, "points": 70}},
+                {"name": "Mitch Marner", "position": "RW", "stats": {"goals": 18, "assists": 49, "points": 67}},
+                {"name": "William Nylander", "position": "RW", "stats": {"goals": 31, "assists": 34, "points": 65}},
+            ],
+            "games": [
+                {"date": "2026-02-12", "opponent": "Montreal Canadiens", "home": True, "status": "played", "score": "4-2"},
+                {"date": "2026-02-15", "opponent": "Ottawa Senators", "home": False, "status": "played", "score": "3-5"},
+                {"date": "2026-02-23", "opponent": "Boston Bruins", "home": True, "status": "upcoming", "score": None},
+            ],
+            "source": "static",
+        },
+        "blue-jays": {
+            "id": team_id,
+            "name": "Toronto Blue Jays",
+            "league": "MLB",
+            "players": [
+                {"name": "Vladimir Guerrero Jr.", "position": "1B", "stats": {"avg": 0.291, "hr": 32, "rbi": 98}},
+                {"name": "Bo Bichette", "position": "SS", "stats": {"avg": 0.285, "hr": 24, "rbi": 86}},
+                {"name": "George Springer", "position": "OF", "stats": {"avg": 0.271, "hr": 22, "rbi": 73}},
+            ],
+            "games": [
+                {"date": "2026-02-08", "opponent": "New York Yankees", "home": False, "status": "played", "score": "6-4"},
+                {"date": "2026-02-11", "opponent": "Tampa Bay Rays", "home": True, "status": "played", "score": "2-5"},
+                {"date": "2026-02-27", "opponent": "Baltimore Orioles", "home": True, "status": "upcoming", "score": None},
+            ],
+            "source": "static",
+        },
+    }
+    
+    return fallback_data.get(team_id, {
         "id": team_id,
         "name": config["name"],
         "league": config["league"],
         "players": [],
         "games": [],
         "source": "static",
-    }
+    })
 
 
 @app.get("/api/health")
@@ -199,16 +277,16 @@ def get_teams() -> dict:
     teams = []
     for team_id, config in TEAM_CONFIG.items():
         entry = {"id": team_id, "name": config["name"], "league": config["league"]}
-        if APISPORTS_KEY:
+        if SPORTS_DATA_SOURCE != "fallback":
             try:
                 connector = _connector_for(team_id)
                 season = _get_season(team_id)
-                data = connector.get("/teams", params={"search": config["search"], "season": season})
-                team_info = _extract_team(data)
+                data = connector.get_teams(season=season, search=config["search"])
+                team_info = connector.extract_team(data)
                 if team_info and team_info.get("id"):
                     entry["external_id"] = team_info.get("id")
                     entry["name"] = team_info.get("name", entry["name"])
-            except ApiSportsError:
+            except Exception:
                 entry["source"] = "static"
         teams.append(entry)
     return {"teams": teams}
@@ -265,44 +343,60 @@ TEAM_DETAILS = {
 
 @app.get("/api/teams/{team_id}")
 def get_team(team_id: str) -> dict:
+    logger.debug(f"GET /api/teams/{team_id}")
     if team_id not in TEAM_CONFIG:
+        logger.warning(f"Team not found: {team_id}")
         raise HTTPException(status_code=404, detail="Team not found")
 
     cached = TEAM_CACHE.get(team_id)
     if cached and time.time() - cached["timestamp"] < CACHE_TTL_SECONDS:
+        logger.debug(f"Returning cached data for {team_id}")
         return cached["data"]
 
-    if not APISPORTS_KEY:
-        return _fallback_team(team_id)
+    if SPORTS_DATA_SOURCE == "fallback":
+        logger.debug(f"Using fallback data for {team_id}")
+        result = _fallback_team(team_id)
+        TEAM_CACHE[team_id] = {"timestamp": time.time(), "data": result}
+        return result
 
     try:
         config = TEAM_CONFIG[team_id]
         connector = _connector_for(team_id)
         season = _get_season(team_id)
+        logger.debug(f"Fetching {team_id} from {SPORTS_DATA_SOURCE} with season {season}")
 
-        teams_response = connector.get("/teams", params={"search": config["search"], "season": season})
-        team_info = _extract_team(teams_response)
+        teams_response = connector.get_teams(season=season, search=config["search"])
+        logger.debug(f"Teams response for {team_id}: {teams_response}")
+        team_info = connector.extract_team(teams_response)
+        logger.debug(f"Extracted team info: {team_info}")
         team_name = (team_info or {}).get("name", config["name"])
         external_id = (team_info or {}).get("id")
+        logger.debug(f"Team info: name={team_name}, id={external_id}")
 
-        players_response = connector.get(
-            "/players",
-            params={"search": config["search"], "season": season} if external_id is None else {"team": external_id, "season": season},
+        players_response = connector.get_players(
+            season=season,
+            team_id=external_id,
+            search=config["search"] if external_id is None else None,
         )
-        games_response = connector.get(
-            "/games",
-            params={"team": external_id, "season": season} if external_id is not None else {"season": season, "search": config["search"]},
+        logger.debug(f"Players response: {players_response}")
+        games_response = connector.get_games(
+            season=season,
+            team_id=external_id,
+            search=config["search"] if external_id is None else None,
         )
+        logger.debug(f"Games response: {games_response}")
 
         team_data = {
             "id": team_id,
             "name": team_name,
             "league": config["league"],
-            "players": _extract_players(players_response),
-            "games": _extract_games(games_response, team_name),
-            "source": "api-sports",
+            "players": connector.extract_players(players_response),
+            "games": connector.extract_games(games_response, team_name),
+            "source": SPORTS_DATA_SOURCE,
         }
-    except ApiSportsError as exc:
+        logger.debug(f"Successfully fetched {team_id} from {SPORTS_DATA_SOURCE}")
+    except Exception as exc:
+        logger.error(f"Error fetching {team_id} from {SPORTS_DATA_SOURCE}: {exc}")
         team_data = _fallback_team(team_id)
         team_data["warning"] = str(exc)
 
