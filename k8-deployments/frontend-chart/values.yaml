@@ -1,0 +1,21 @@
+replicaCount: 1
+
+image:
+  repository: your-registry/scorecheck-frontend
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 150m
+    memory: 128Mi
+
+env:
+  VUE_APP_API_URL: http://scorecheck-backend:8000/api
