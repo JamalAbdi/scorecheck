@@ -73,9 +73,12 @@ const playerStats = computed(() => {
 
 const loadTeam = async () => {
   try {
-    const response = await fetch(`http://localhost:8000/api/teams/${route.params.id}`)
+    const league = route.params.league
+    const teamId = route.params.id
+    const response = await fetch(`http://localhost:8000/api/leagues/${league}/teams/${teamId}`)
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`)
+      const message = await response.text()
+      throw new Error(message || `API error: ${response.status}`)
     }
     team.value = await response.json()
   } catch (err) {

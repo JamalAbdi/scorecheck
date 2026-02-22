@@ -48,20 +48,30 @@ class TheSportsDBConnector(BaseSportDataConnector):
         params_dict = dict(params or {})
 
         try:
-            resp = self._session.get(
-                url,
-                headers=self._headers(),
-                params=params_dict,
-                timeout=self._timeout,
-            )
-            resp.raise_for_status()
-            
-            # Handle empty response
-            if not resp.text or resp.text.strip() == "":
-                return {}
-            
-            data = resp.json()
-            return data
+            for attempt in range(3):
+                resp = self._session.get(
+                    url,
+                    headers=self._headers(),
+                    params=params_dict,
+                    timeout=self._timeout,
+                )
+                if resp.status_code == 429 and attempt < 2:
+                    retry_after = resp.headers.get("Retry-After")
+                    try:
+                        wait_seconds = float(retry_after) if retry_after else 1.0
+                    except ValueError:
+                        wait_seconds = 1.0
+                    import time
+                    time.sleep(wait_seconds)
+                    continue
+                resp.raise_for_status()
+                
+                # Handle empty response
+                if not resp.text or resp.text.strip() == "":
+                    return {}
+                
+                data = resp.json()
+                return data
         except requests.RequestException as exc:
             raise TheSportsDBError(f"Request failed: {exc}") from exc
         except Exception as exc:
@@ -71,6 +81,18 @@ class TheSportsDBConnector(BaseSportDataConnector):
         """Search for teams using searchteams.php endpoint."""
         if search:
             return self._get("/searchteams.php", params={"t": search})
+        return {}
+
+    def get_teams_by_league(self, league_name: str) -> Json:
+        """Fetch all teams for a league using search_all_teams.php."""
+        if league_name:
+            return self._get("/search_all_teams.php", params={"l": league_name})
+        return {}
+
+    def get_team_by_id(self, team_id: Optional[int]) -> Json:
+        """Fetch team info using lookupteam.php."""
+        if team_id:
+            return self._get("/lookupteam.php", params={"id": team_id})
         return {}
 
     def get_players(self, season: str, team_id: Optional[int] = None, search: Optional[str] = None) -> Json:
@@ -97,6 +119,32 @@ class TheSportsDBConnector(BaseSportDataConnector):
                     "name": first.get("strTeam"),
                 }
         return None
+
+    def extract_teams(self, data: Json) -> List[Dict[str, Any]]:
+        """Extract team list from TheSportsDB response."""
+        teams = data.get("teams")
+        if not isinstance(teams, list):
+            return []
+
+        result: List[Dict[str, Any]] = []
+        for item in teams:
+            if not isinstance(item, dict):
+                continue
+            team_id = item.get("idTeam")
+            name = item.get("strTeam")
+            league = item.get("strLeague")
+            if not team_id or not name:
+                continue
+            result.append(
+                {
+                    "id": team_id,
+                    "name": name,
+                    "league": league,
+                }
+            )
+
+        result.sort(key=lambda t: t["name"])
+        return result
 
     def extract_players(self, data: Json) -> List[Dict[str, Any]]:
         """Extract players from TheSportsDB response."""
