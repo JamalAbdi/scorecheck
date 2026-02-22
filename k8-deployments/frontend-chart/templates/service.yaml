@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scorecheck-frontend.fullname" . }}
+  labels:
+    app: {{ include "scorecheck-frontend.name" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ include "scorecheck-frontend.name" . }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: 8080
