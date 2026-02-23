@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: your-registry/scorecheck-frontend
+  repository: 437537529252.dkr.ecr.us-east-1.amazonaws.com/scorecheck-frontend
   tag: latest
   pullPolicy: IfNotPresent
 

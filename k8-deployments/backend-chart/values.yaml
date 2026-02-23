@@ -1,9 +1,10 @@
 replicaCount: 1
 
 image:
-  repository: your-registry/scorecheck-backend
+  repository: 437537529252.dkr.ecr.us-east-1.amazonaws.com/scorecheck-backend
   tag: latest
   pullPolicy: IfNotPresent
+
 
 service:
   type: ClusterIP

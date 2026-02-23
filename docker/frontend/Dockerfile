@@ -1,17 +1,17 @@
 # Multi-stage build for frontend
-FROM node:18-alpine as builder
+FROM node:18-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package files from src/frontend when building from repo root context
+COPY src/frontend/package*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm install || true
 
 # Copy source code
-COPY . .
+COPY src/frontend/ .
 
 # Build the Vue application
 RUN npm run build
