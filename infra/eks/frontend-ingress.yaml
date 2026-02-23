@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scorecheck-frontend-ingress
+  namespace: scorecheck
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-port: "8080"
+    alb.ingress.kubernetes.io/subnets: subnet-0c7611d7ee649bed6,subnet-05f9ba3efabe6108c,subnet-07b1bd36dd7b4ff25
+spec:
+  ingressClassName: alb
+  rules:
+    - host: frontend.scorecheck.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: scorecheck-frontend
+                port:
+                  number: 8080

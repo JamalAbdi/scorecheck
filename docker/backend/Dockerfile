@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+# requirements.txt is located under src/backend in repo root context
+COPY src/backend/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \

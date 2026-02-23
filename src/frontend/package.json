@@ -1,0 +1,8 @@
+{
+  "name": "scorecheck-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p dist && cp -r . dist || true"
+  }
+}
