@@ -6,9 +6,32 @@ NODEGROUP_NAME=${NODEGROUP_NAME:-${CLUSTER_NAME}-node-group}
 AWS_REGION=${AWS_REGION:-us-east-1}
 NAMESPACE=${NAMESPACE:-scorecheck}
 HEALTHCHECK_URL=${HEALTHCHECK_URL:-https://scorecheck.ca/api/health}
+INGRESS_NAME=${INGRESS_NAME:-scorecheck-frontend-ingress}
+SLEEP_RULE_PRIORITY=${SLEEP_RULE_PRIORITY:-49999}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INGRESS_MANIFEST=${INGRESS_MANIFEST:-"${SCRIPT_DIR}/../infra/eks/frontend-ingress.yaml"}
 
 echo "Updating kubeconfig for EKS cluster: ${CLUSTER_NAME} (region: ${AWS_REGION})"
 aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}" >/dev/null
+
+echo "Restoring ALB routing from ingress manifest..."
+kubectl apply -f "${INGRESS_MANIFEST}" >/dev/null
+
+echo "Removing legacy ALB sleep rule (if present)..."
+ALB_DNS=$(kubectl -n "${NAMESPACE}" get ingress "${INGRESS_NAME}" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+if [[ -n "${ALB_DNS}" ]]; then
+  ALB_ARN=$(aws elbv2 describe-load-balancers --region "${AWS_REGION}" --query "LoadBalancers[?DNSName=='${ALB_DNS}'].LoadBalancerArn | [0]" --output text)
+  HTTPS_LISTENER_ARN=$(aws elbv2 describe-listeners --region "${AWS_REGION}" --load-balancer-arn "${ALB_ARN}" --query 'Listeners[?Port==`443`].ListenerArn | [0]' --output text)
+  if [[ "${HTTPS_LISTENER_ARN}" != "None" && -n "${HTTPS_LISTENER_ARN}" ]]; then
+    SLEEP_RULE_ARN=$(aws elbv2 describe-rules --region "${AWS_REGION}" --listener-arn "${HTTPS_LISTENER_ARN}" --query "Rules[?Priority=='${SLEEP_RULE_PRIORITY}' && Actions[0].Type=='fixed-response'].RuleArn | [0]" --output text)
+    if [[ "${SLEEP_RULE_ARN}" != "None" && -n "${SLEEP_RULE_ARN}" ]]; then
+      aws elbv2 delete-rule --region "${AWS_REGION}" --rule-arn "${SLEEP_RULE_ARN}" >/dev/null
+      echo "Sleep message rule removed."
+    else
+      echo "No sleep message rule found."
+    fi
+  fi
+fi
 
 echo "Scaling node group '${NODEGROUP_NAME}' up to 1 (wake mode)..."
 aws eks update-nodegroup-config \
