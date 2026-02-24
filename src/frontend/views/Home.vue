@@ -50,12 +50,6 @@
   </section>
 </template>
 
-<script>
-export default {
-  name: 'HomeView',
-}
-</script>
-
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -72,7 +66,9 @@ const selectedTeamId = ref('')
 
 const filteredTeams = computed(() => teams.value)
 
-watch(selectedLeague, async (leagueId) => {
+const apiUrl = process.env.VUE_APP_API_URL || '/api'
+
+  watch(selectedLeague, async (leagueId) => {
   selectedTeamId.value = ''
   teams.value = []
   teamError.value = ''
@@ -82,7 +78,7 @@ watch(selectedLeague, async (leagueId) => {
 
   loadingTeams.value = true
   try {
-    const response = await fetch(`http://localhost:8000/api/leagues/${leagueId}/teams`)
+    const response = await fetch(`${apiUrl}/leagues/${leagueId}/teams`)
     if (!response.ok) {
       const message = await response.text()
       throw new Error(message || `API error: ${response.status}`)
@@ -104,7 +100,7 @@ const goToTeam = () => {
 
 onMounted(async () => {
   try {
-    const response = await fetch('http://localhost:8000/api/leagues')
+    const response = await fetch(`${apiUrl}/leagues`)
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`)
     }

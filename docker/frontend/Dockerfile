@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files from src/frontend when building from repo root context
 COPY src/frontend/package*.json ./
 
-# Install dependencies
-RUN npm install || true
+# Install dependencies - fail if install fails
+RUN npm install
 
 # Copy source code
 COPY src/frontend/ .

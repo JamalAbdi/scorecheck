@@ -3,7 +3,9 @@ replicaCount: 1
 image:
   repository: 437537529252.dkr.ecr.us-east-1.amazonaws.com/scorecheck-backend
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
+
+apiSportsSecretName: apisports-secret
 
 
 service:
@@ -20,7 +22,6 @@ resources:
 
 env:
   SPORTS_DATA_SOURCE: thesportsdb
-  APISPORTS_KEY: ""
   APISPORTS_SEASON: "2024"
   APISPORTS_NBA_SEASON: "2024"
   APISPORTS_NHL_SEASON: "2024"

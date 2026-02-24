@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: 437537529252.dkr.ecr.us-east-1.amazonaws.com/scorecheck-frontend
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 service:
   type: ClusterIP
@@ -18,4 +18,4 @@ resources:
     memory: 128Mi
 
 env:
-  VUE_APP_API_URL: http://scorecheck-backend:8000/api
+  VUE_APP_API_URL: https://scorecheck.ca/api

@@ -6,16 +6,25 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:437537529252:certificate/33b84c2f-e529-44db-a549-80e86d61cf29
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/healthcheck-path: /
     alb.ingress.kubernetes.io/healthcheck-port: "8080"
     alb.ingress.kubernetes.io/subnets: subnet-0c7611d7ee649bed6,subnet-05f9ba3efabe6108c,subnet-07b1bd36dd7b4ff25
 spec:
   ingressClassName: alb
   rules:
-    - host: frontend.scorecheck.ca
+    - host: scorecheck.ca
       http:
         paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: scorecheck-backend
+                port:
+                  number: 8000
           - path: /
             pathType: Prefix
             backend:
