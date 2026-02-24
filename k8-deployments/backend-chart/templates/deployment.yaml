@@ -24,7 +24,11 @@ spec:
             - name: SPORTS_DATA_SOURCE
               value: {{ .Values.env.SPORTS_DATA_SOURCE | quote }}
             - name: APISPORTS_KEY
-              value: {{ .Values.env.APISPORTS_KEY | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiSportsSecretName | quote }}
+                  key: APISPORTS_KEY
+                  optional: true
             - name: APISPORTS_SEASON
               value: {{ .Values.env.APISPORTS_SEASON | quote }}
             - name: APISPORTS_NBA_SEASON

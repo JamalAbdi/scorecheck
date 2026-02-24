@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart backend-build frontend-build
+.PHONY: help build up down logs clean restart backend-build frontend-build k8-sleep k8-wake k8-schedule-on k8-schedule-off
 
 help:
 	@echo "Scorecheck Docker Commands"
@@ -17,27 +17,31 @@ help:
 	@echo "  make status             - Show service status"
 	@echo "  make shell-backend      - Open shell in backend container"
 	@echo "  make shell-frontend     - Open shell in frontend container"
+	@echo "  make k8-sleep           - Scale EKS node group to 0 (cost-saving sleep mode)"
+	@echo "  make k8-wake            - Scale EKS node group to 1 (restore service)"
+	@echo "  make k8-schedule-on     - Auto sleep at 00:00 and wake at 08:00 daily"
+	@echo "  make k8-schedule-off    - Remove auto sleep/wake schedule"
 
 build:
-	cd docker && docker-compose build
+	cd docker && docker compose build
 
 up:
-	cd docker && docker-compose up -d
+	cd docker && docker compose up -d
 
 down:
-	cd docker && docker-compose down
+	cd docker && docker compose down
 
 restart:
-	cd docker && docker-compose restart
+	cd docker && docker compose restart
 
 logs:
-	cd docker && docker-compose logs -f
+	cd docker && docker compose logs -f
 
 logs-backend:
-	cd docker && docker-compose logs -f backend
+	cd docker && docker compose logs -f backend
 
 logs-frontend:
-	cd docker && docker-compose logs -f frontend
+	cd docker && docker compose logs -f frontend
 
 clean:
 	cd docker && docker-compose down -v
@@ -50,10 +54,22 @@ frontend-build:
 	docker build -f docker/frontend/Dockerfile -t scorecheck-frontend:latest .
 
 status:
-	cd docker && docker-compose ps
+	cd docker && docker compose ps
 
 shell-backend:
 	docker exec -it scorecheck-backend /bin/sh
 
 shell-frontend:
 	docker exec -it scorecheck-frontend /bin/sh
+
+k8-sleep:
+	./k8-deployments/sleep.sh
+
+k8-wake:
+	./k8-deployments/wake.sh
+
+k8-schedule-on:
+	./k8-deployments/install-schedule.sh
+
+k8-schedule-off:
+	./k8-deployments/remove-schedule.sh

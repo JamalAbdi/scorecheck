@@ -128,10 +128,11 @@ resource "aws_eks_node_group" "eks_node_group" {
 
   scaling_config {
     desired_size = var.node_group_desired_capacity
-    max_size     = 5
-    min_size     = 1
+    max_size     = var.node_group_max_capacity
+    min_size     = var.node_group_min_capacity
   }
 
+  capacity_type  = var.node_group_capacity_type
   instance_types = [var.node_group_instance_type]
 
   depends_on = [

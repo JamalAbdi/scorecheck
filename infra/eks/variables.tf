@@ -34,6 +34,24 @@ variable "node_group_desired_capacity" {
   default     = 2
 }
 
+variable "node_group_min_capacity" {
+  description = "Minimum number of worker nodes"
+  type        = number
+  default     = 1
+}
+
+variable "node_group_max_capacity" {
+  description = "Maximum number of worker nodes"
+  type        = number
+  default     = 1
+}
+
+variable "node_group_capacity_type" {
+  description = "Node group capacity type (ON_DEMAND or SPOT)"
+  type        = string
+  default     = "ON_DEMAND"
+}
+
 variable "domain_name" {
   description = "Domain name for Route 53 hosted zone"
   type        = string

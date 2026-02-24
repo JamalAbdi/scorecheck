@@ -48,12 +48,6 @@
   </section>
 </template>
 
-<script>
-export default {
-  name: 'TeamView',
-}
-</script>
-
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
@@ -62,6 +56,7 @@ const route = useRoute()
 const team = ref(null)
 const loading = ref(true)
 const error = ref('')
+const apiUrl = process.env.VUE_APP_API_URL || '/api'
 
 const playerStats = computed(() => {
   if (!team.value || team.value.players.length === 0) {
@@ -75,7 +70,7 @@ const loadTeam = async () => {
   try {
     const league = route.params.league
     const teamId = route.params.id
-    const response = await fetch(`http://localhost:8000/api/leagues/${league}/teams/${teamId}`)
+    const response = await fetch(`${apiUrl}/leagues/${league}/teams/${teamId}`)
     if (!response.ok) {
       const message = await response.text()
       throw new Error(message || `API error: ${response.status}`)
