@@ -1,0 +1,14 @@
+.dockerignore
+node_modules/
+.git
+.gitignore
+.vscode
+.idea
+*.log
+.env.local
+.DS_Store
+coverage/
+dist/
+build/
+__pycache__
+*.py[cod]

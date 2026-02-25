@@ -1,0 +1,28 @@
+replicaCount: 1
+
+image:
+  repository: 437537529252.dkr.ecr.us-east-1.amazonaws.com/scorecheck-backend
+  tag: latest
+  pullPolicy: Always
+
+apiSportsSecretName: apisports-secret
+
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+env:
+  SPORTS_DATA_SOURCE: thesportsdb
+  APISPORTS_SEASON: "2024"
+  APISPORTS_NBA_SEASON: "2024"
+  APISPORTS_NHL_SEASON: "2024"
+  APISPORTS_MLB_SEASON: "2024"
