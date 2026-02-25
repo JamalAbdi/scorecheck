@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scorecheck-backend.fullname" . }}
+  labels:
+    app: {{ include "scorecheck-backend.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "scorecheck-backend.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "scorecheck-backend.name" . }}
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: SPORTS_DATA_SOURCE
+              value: {{ .Values.env.SPORTS_DATA_SOURCE | quote }}
+            - name: APISPORTS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiSportsSecretName | quote }}
+                  key: APISPORTS_KEY
+                  optional: true
+            - name: APISPORTS_SEASON
+              value: {{ .Values.env.APISPORTS_SEASON | quote }}
+            - name: APISPORTS_NBA_SEASON
+              value: {{ .Values.env.APISPORTS_NBA_SEASON | quote }}
+            - name: APISPORTS_NHL_SEASON
+              value: {{ .Values.env.APISPORTS_NHL_SEASON | quote }}
+            - name: APISPORTS_MLB_SEASON
+              value: {{ .Values.env.APISPORTS_MLB_SEASON | quote }}
+          resources:
+{{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20

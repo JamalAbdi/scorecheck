@@ -28,10 +28,12 @@ resource "aws_subnet" "eks_subnets" {
 
   vpc_id            = aws_vpc.eks_vpc.id
   cidr_block        = var.subnet_cidrs[count.index]
-  availability_zone = data.aws_availability_zones.available.names[count.index]
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
 
   tags = {
     Name = "${var.cluster_name}-subnet-${count.index}"
+    "kubernetes.io/role/elb" = "1"
   }
 }
 
@@ -73,7 +75,7 @@ resource "aws_route_table_association" "eks_rta" {
 resource "aws_eks_cluster" "eks_cluster" {
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = "1.28"
+  version  = "1.30"
 
   vpc_config {
     subnet_ids = aws_subnet.eks_subnets[*].id
@@ -126,10 +128,11 @@ resource "aws_eks_node_group" "eks_node_group" {
 
   scaling_config {
     desired_size = var.node_group_desired_capacity
-    max_size     = 5
-    min_size     = 1
+    max_size     = var.node_group_max_capacity
+    min_size     = var.node_group_min_capacity
   }
 
+  capacity_type  = var.node_group_capacity_type
   instance_types = [var.node_group_instance_type]
 
   depends_on = [

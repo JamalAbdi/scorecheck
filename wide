@@ -1,0 +1,46 @@
+{
+    "nodegroup": {
+        "nodegroupName": "scorecheck-eks-node-group",
+        "nodegroupArn": "arn:aws:eks:us-east-1:437537529252:nodegroup/scorecheck-eks/scorecheck-eks-node-group/9cce41c2-719f-326e-18b8-4a3e80128eef",
+        "clusterName": "scorecheck-eks",
+        "version": "1.30",
+        "releaseVersion": "1.30.14-20260209",
+        "createdAt": "2026-02-21T23:04:11.507000-05:00",
+        "modifiedAt": "2026-02-21T23:05:51.396000-05:00",
+        "status": "ACTIVE",
+        "capacityType": "ON_DEMAND",
+        "scalingConfig": {
+            "minSize": 1,
+            "maxSize": 5,
+            "desiredSize": 1
+        },
+        "instanceTypes": [
+            "t3.small"
+        ],
+        "subnets": [
+            "subnet-07b1bd36dd7b4ff25",
+            "subnet-05f9ba3efabe6108c",
+            "subnet-0c7611d7ee649bed6"
+        ],
+        "amiType": "AL2023_x86_64_STANDARD",
+        "nodeRole": "arn:aws:iam::437537529252:role/scorecheck-eks-node-role",
+        "labels": {},
+        "resources": {
+            "autoScalingGroups": [
+                {
+                    "name": "eks-scorecheck-eks-node-group-9cce41c2-719f-326e-18b8-4a3e80128eef"
+                }
+            ]
+        },
+        "diskSize": 20,
+        "health": {
+            "issues": []
+        },
+        "updateConfig": {
+            "maxUnavailable": 1
+        },
+        "tags": {
+            "Name": "scorecheck-eks-node-group"
+        }
+    }
+}

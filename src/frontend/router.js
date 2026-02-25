@@ -4,7 +4,7 @@ import TeamView from './views/Team.vue'
 
 const routes = [
   { path: '/', name: 'home', component: HomeView },
-  { path: '/teams/:id', name: 'team', component: TeamView, props: true },
+  { path: '/teams/:league/:id', name: 'team', component: TeamView, props: true },
 ]
 
 const router = createRouter({
