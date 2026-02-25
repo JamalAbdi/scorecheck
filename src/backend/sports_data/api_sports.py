@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, TypeVar
 import time
+from datetime import datetime
 
 import requests
 from requests import Response
@@ -279,4 +280,18 @@ class ApiSportsConnector(BaseSportDataConnector):
                 }
             )
 
-        return games[:10]
+        def _parse_date(game: Dict[str, Any]) -> datetime:
+            raw = str(game.get("date") or "")
+            for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    return datetime.strptime(raw, fmt)
+                except ValueError:
+                    continue
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.min
+
+        played_games = [game for game in games if game.get("status") == "played"]
+        played_games.sort(key=_parse_date, reverse=True)
+        return played_games[:30]

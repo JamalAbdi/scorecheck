@@ -29,6 +29,8 @@ services:
     build:
       context: ..
       dockerfile: docker/frontend/Dockerfile
+      args:
+        VUE_APP_API_URL: http://localhost:8000/api
     container_name: scorecheck-frontend
     ports:
       - "8080:8080"

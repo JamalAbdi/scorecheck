@@ -4,6 +4,10 @@ FROM node:18-alpine AS builder
 # Set working directory
 WORKDIR /app
 
+# Build-time API base URL for Vue app
+ARG VUE_APP_API_URL=/api
+ENV VUE_APP_API_URL=$VUE_APP_API_URL
+
 # Copy package files from src/frontend when building from repo root context
 COPY src/frontend/package*.json ./
 

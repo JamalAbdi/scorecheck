@@ -30,18 +30,18 @@
       </div>
 
       <div>
-        <h3>Games</h3>
+        <h3>Last 30 Games</h3>
         <div class="games">
-          <div class="game" v-for="game in team.games" :key="game.date + game.opponent">
+          <div class="game" v-for="game in lastThirtyGames" :key="game.date + game.opponent">
             <div class="game-meta">
               <strong>{{ game.date }}</strong>
               <span>{{ game.home ? 'Home' : 'Away' }} vs {{ game.opponent }}</span>
             </div>
             <div class="game-score">
-              <span v-if="game.status === 'played'">Final: {{ game.score }}</span>
-              <span v-else>Upcoming</span>
+              <span>Final: {{ game.score || '-' }}</span>
             </div>
           </div>
+          <p v-if="lastThirtyGames.length === 0">No completed games available.</p>
         </div>
       </div>
     </div>
@@ -64,6 +64,21 @@ const playerStats = computed(() => {
   }
   const sample = team.value.players[0]
   return Object.keys(sample.stats || {})
+})
+
+const lastThirtyGames = computed(() => {
+  if (!team.value || !Array.isArray(team.value.games)) {
+    return []
+  }
+
+  return [...team.value.games]
+    .filter((game) => game?.status === 'played')
+    .sort((first, second) => {
+      const firstDate = Date.parse(first?.date || '')
+      const secondDate = Date.parse(second?.date || '')
+      return (Number.isFinite(secondDate) ? secondDate : 0) - (Number.isFinite(firstDate) ? firstDate : 0)
+    })
+    .slice(0, 30)
 })
 
 const loadTeam = async () => {

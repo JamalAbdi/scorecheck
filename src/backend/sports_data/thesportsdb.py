@@ -266,7 +266,8 @@ class TheSportsDBConnector(BaseSportDataConnector):
                 }
             )
 
-        # Sort by date and return
-        games.sort(key=lambda g: g["date"])
-        logger.debug(f"extract_games: returning {len(games)} games")
-        return games
+        played_games = [game for game in games if game.get("status") == "played"]
+        played_games.sort(key=lambda g: g["date"], reverse=True)
+        played_games = played_games[:30]
+        logger.debug(f"extract_games: returning {len(played_games)} games")
+        return played_games
