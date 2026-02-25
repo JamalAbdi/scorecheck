@@ -1,195 +1,217 @@
 <template>
-  <section class="selector">
-    <div class="selector-header">
-      <h2>Choose a league</h2>
-      <p>Select a league, then pick a team to view details.</p>
+  <section class="dashboard">
+    <div class="dashboard-header">
+      <h2>All Sports Dashboard</h2>
+      <p>Team records and last 30 completed games.</p>
     </div>
 
-    <div class="selector-grid">
-      <div class="field">
-        <label for="league">League</label>
-        <select id="league" v-model="selectedLeague" :disabled="loadingLeagues || !!error">
-          <option value="">Choose a league</option>
-          <option
-            v-for="league in leagues"
-            :key="league.id"
-            :value="league.id"
-            :disabled="!league.available"
-          >
-            {{ league.name }}
-          </option>
-        </select>
-      </div>
+    <p v-if="loading" class="status">Loading teams...</p>
+    <p v-else-if="error" class="status">{{ error }}</p>
 
-      <div class="field">
-        <label for="team">Team</label>
-        <select
-          id="team"
-          v-model="selectedTeamId"
-          :disabled="!selectedLeague || loadingTeams || !!teamError || !!error"
-        >
-          <option value="">Choose a team</option>
-          <option v-for="team in filteredTeams" :key="team.id" :value="team.id">
-            {{ team.name }}
-          </option>
-        </select>
-      </div>
+    <div v-else class="league-sections">
+      <section class="league-section" v-for="section in sections" :key="section.league">
+        <h3>{{ section.league }}</h3>
 
-      <button class="primary" :disabled="!selectedTeamId" @click="goToTeam">
-        View Team
-      </button>
-    </div>
+        <div class="team-card" v-for="team in section.teams" :key="team.id">
+          <div class="team-header">
+            <router-link class="team-link" :to="team.link">{{ team.name }}</router-link>
+            <span class="record">Record: {{ team.record }}</span>
+          </div>
 
-    <div class="status">
-      <p v-if="loadingLeagues">Loading leagues...</p>
-      <p v-else-if="error">{{ error }}</p>
-      <p v-else-if="loadingTeams">Loading teams...</p>
-      <p v-else-if="teamError">{{ teamError }}</p>
-      <p v-else-if="selectedLeague && filteredTeams.length === 0">No teams found.</p>
+          <div class="games">
+            <div class="game" v-for="game in team.games" :key="`${team.id}-${game.date}-${game.opponent}`">
+              <span>{{ game.date }}</span>
+              <span>{{ game.home ? 'vs' : '@' }} {{ game.opponent }}</span>
+              <strong>{{ game.score }}</strong>
+            </div>
+            <p v-if="team.games.length === 0" class="status">No completed games available.</p>
+          </div>
+        </div>
+      </section>
     </div>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
 
-const router = useRouter()
-const leagues = ref([])
-const teams = ref([])
-const loadingLeagues = ref(true)
-const loadingTeams = ref(false)
+const loading = ref(true)
 const error = ref('')
-const teamError = ref('')
-const selectedLeague = ref('')
-const selectedTeamId = ref('')
-
-const filteredTeams = computed(() => teams.value)
-
+const teams = ref([])
 const apiUrl = process.env.VUE_APP_API_URL || '/api'
 
-  watch(selectedLeague, async (leagueId) => {
-  selectedTeamId.value = ''
-  teams.value = []
-  teamError.value = ''
-  if (!leagueId) {
-    return
-  }
+const parseRecord = (games) => {
+  let wins = 0
+  let losses = 0
+  let ties = 0
 
-  loadingTeams.value = true
-  try {
-    const response = await fetch(`${apiUrl}/leagues/${leagueId}/teams`)
-    if (!response.ok) {
-      const message = await response.text()
-      throw new Error(message || `API error: ${response.status}`)
+  for (const game of games) {
+    if (!game?.score || typeof game.score !== 'string') {
+      continue
     }
-    const data = await response.json()
-    teams.value = data.teams || []
-  } catch (err) {
-    teamError.value = err instanceof Error ? err.message : 'Unknown error'
-  } finally {
-    loadingTeams.value = false
-  }
-})
+    const [homeScoreText, awayScoreText] = game.score.split('-')
+    const homeScore = Number(homeScoreText)
+    const awayScore = Number(awayScoreText)
+    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
+      continue
+    }
 
-const goToTeam = () => {
-  if (selectedTeamId.value && selectedLeague.value) {
-    router.push(`/teams/${selectedLeague.value}/${selectedTeamId.value}`)
+    const teamScore = game.home ? homeScore : awayScore
+    const opponentScore = game.home ? awayScore : homeScore
+
+    if (teamScore > opponentScore) {
+      wins += 1
+    } else if (teamScore < opponentScore) {
+      losses += 1
+    } else {
+      ties += 1
+    }
   }
+
+  return ties > 0 ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`
 }
 
-onMounted(async () => {
-  try {
-    const response = await fetch(`${apiUrl}/leagues`)
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`)
+const sections = computed(() => {
+  const grouped = {}
+  for (const team of teams.value) {
+    const league = team.league || 'Other'
+    if (!grouped[league]) {
+      grouped[league] = []
     }
-    const data = await response.json()
-    leagues.value = data.leagues || []
+    grouped[league].push(team)
+  }
+
+  return Object.entries(grouped)
+    .sort(([leagueA], [leagueB]) => leagueA.localeCompare(leagueB))
+    .map(([league, leagueTeams]) => ({
+      league,
+      teams: leagueTeams.slice(0, 3),
+    }))
+})
+
+const loadDashboard = async () => {
+  try {
+    const teamsResponse = await fetch(`${apiUrl}/teams`)
+    if (!teamsResponse.ok) {
+      throw new Error(`API error: ${teamsResponse.status}`)
+    }
+    const teamsData = await teamsResponse.json()
+    const baseTeams = teamsData.teams || []
+
+    const details = await Promise.all(
+      baseTeams.map(async (team) => {
+        const response = await fetch(`${apiUrl}/teams/${team.id}`)
+        if (!response.ok) {
+          return {
+            ...team,
+            games: [],
+            record: '0-0',
+            link: '/',
+          }
+        }
+
+        const detail = await response.json()
+        const lastThirtyGames = (detail.games || [])
+          .filter((game) => game?.status === 'played')
+          .sort((first, second) => {
+            const firstDate = Date.parse(first?.date || '')
+            const secondDate = Date.parse(second?.date || '')
+            return (Number.isFinite(secondDate) ? secondDate : 0) - (Number.isFinite(firstDate) ? firstDate : 0)
+          })
+          .slice(0, 30)
+
+        return {
+          id: team.id,
+          name: detail.name || team.name,
+          league: detail.league || team.league,
+          games: lastThirtyGames,
+          record: parseRecord(lastThirtyGames),
+          link: `/teams/${String(team.league || '').toLowerCase()}/${team.id}`,
+        }
+      })
+    )
+
+    teams.value = details
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Unknown error'
   } finally {
-    loadingLeagues.value = false
+    loading.value = false
   }
-})
+}
+
+onMounted(loadDashboard)
 </script>
 
 <style scoped>
-.selector {
+.dashboard {
   background: #fff;
   border-radius: 20px;
   padding: 28px 32px;
   box-shadow: 0 18px 32px rgba(15, 23, 42, 0.08);
 }
 
-.selector-header h2 {
+.dashboard-header h2 {
   margin: 0 0 6px;
   font-size: 24px;
 }
 
-.selector-header p {
-  margin: 0 0 24px;
+.dashboard-header p {
+  margin: 0 0 20px;
   color: #4b5563;
 }
 
-.selector-grid {
+.league-sections {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
-  align-items: end;
+  gap: 20px;
 }
 
-.field {
+.league-section h3 {
+  margin: 0 0 10px;
+}
+
+.team-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.team-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.team-link {
+  color: #2563eb;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.record {
+  font-weight: 700;
+  color: #111827;
+}
+
+.games {
+  display: grid;
   gap: 8px;
 }
 
-.field label {
-  font-weight: 600;
-  color: #111827;
-}
-
-.field select {
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  font-size: 15px;
+.game {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  border-radius: 10px;
   background: #f9fafb;
-  color: #111827;
-}
-
-.field select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.primary {
-  padding: 12px 18px;
-  border-radius: 12px;
-  border: none;
-  background: #2563eb;
-  color: #fff;
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.25);
-}
-
-.primary:hover:enabled {
-  transform: translateY(-1px);
-  box-shadow: 0 16px 28px rgba(37, 99, 235, 0.3);
-}
-
-.primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  box-shadow: none;
+  padding: 8px 10px;
+  font-size: 14px;
 }
 
 .status {
-  margin-top: 16px;
   color: #6b7280;
 }
 </style>
