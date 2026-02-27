@@ -66,3 +66,6 @@ build/
 *.tfstate
 *.tfstate.backup
 terraform.tfvars
+data/*.db
+k8-deployments/*.log
+infra/db/tfplan*

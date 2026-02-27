@@ -1,217 +1,540 @@
 <template>
-  <section class="dashboard">
-    <div class="dashboard-header">
-      <h2>All Sports Dashboard</h2>
-      <p>Team records and last 30 completed games.</p>
-    </div>
+	<section class="home">
+		<div class="today-games">
+			<h3>Today's Games</h3>
+			<p v-if="loadingTodayGames">Loading games...</p>
+			<p v-else-if="todayGamesError" class="today-games-error">{{ todayGamesError }}</p>
+			<div v-else>
+				<p v-if="hasNoTodayGames && hasAnyYesterdayGames" class="today-empty">
+					No games today. Showing yesterday below.
+				</p>
+				<div class="today-leagues">
+					<div v-for="league in sortedTodayLeagues" :key="`today-${league.id}`" class="today-league">
+						<h4>{{ league.name }}</h4>
+						<div v-if="league.games.length === 0" class="today-empty">No games today.</div>
+						<div v-else class="today-list">
+							<div v-for="game in league.games" :key="game.id || `${league.id}-${game.home_team}-${game.away_team}`" class="today-game">
+								<div class="today-teams">
+									<div class="team-row">
+										<router-link :to="teamRoute(league.id, game.away_team)" class="today-team-link">
+											<img v-if="game.away_logo" :src="game.away_logo" :alt="`${game.away_team} logo`" class="team-logo" />
+											<div class="team-text">
+												<strong>{{ displayTeamName(game.away_team) }}</strong>
+												<span class="team-record">({{ game.away_record || '-' }})</span>
+											</div>
+										</router-link>
+										<span class="team-score">{{ displayTeamScore(game, 'away') }}</span>
+									</div>
+									<div class="team-row">
+										<router-link :to="teamRoute(league.id, game.home_team)" class="today-team-link">
+											<img v-if="game.home_logo" :src="game.home_logo" :alt="`${game.home_team} logo`" class="team-logo" />
+											<div class="team-text">
+												<strong>{{ displayTeamName(game.home_team) }}</strong>
+												<span class="team-record">({{ game.home_record || '-' }})</span>
+											</div>
+										</router-link>
+										<span class="team-score">{{ displayTeamScore(game, 'home') }}</span>
+									</div>
+								</div>
+								<div class="today-status">
+									<span class="today-label">{{ gameStateLabel(game) }}</span>
+									<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
 
-    <p v-if="loading" class="status">Loading teams...</p>
-    <p v-else-if="error" class="status">{{ error }}</p>
-
-    <div v-else class="league-sections">
-      <section class="league-section" v-for="section in sections" :key="section.league">
-        <h3>{{ section.league }}</h3>
-
-        <div class="team-card" v-for="team in section.teams" :key="team.id">
-          <div class="team-header">
-            <router-link class="team-link" :to="team.link">{{ team.name }}</router-link>
-            <span class="record">Record: {{ team.record }}</span>
-          </div>
-
-          <div class="games">
-            <div class="game" v-for="game in team.games" :key="`${team.id}-${game.date}-${game.opponent}`">
-              <span>{{ game.date }}</span>
-              <span>{{ game.home ? 'vs' : '@' }} {{ game.opponent }}</span>
-              <strong>{{ game.score }}</strong>
-            </div>
-            <p v-if="team.games.length === 0" class="status">No completed games available.</p>
-          </div>
-        </div>
-      </section>
-    </div>
-  </section>
+				<div class="yesterday-section">
+					<div class="section-heading-row">
+						<h3 class="yesterday-heading">Yesterday's Games</h3>
+						<span class="date-bubble">Yesterday</span>
+					</div>
+					<div class="today-leagues">
+						<div v-for="league in sortedYesterdayLeagues" :key="`yesterday-${league.id}`" class="today-league">
+							<h4>{{ league.name }}</h4>
+							<div v-if="league.games.length === 0" class="today-empty">No games yesterday.</div>
+							<div v-else class="today-list">
+								<div v-for="game in league.games" :key="game.id || `${league.id}-${game.home_team}-${game.away_team}`" class="today-game">
+									<div class="today-teams">
+										<div class="team-row">
+											<router-link :to="teamRoute(league.id, game.away_team)" class="today-team-link">
+												<img v-if="game.away_logo" :src="game.away_logo" :alt="`${game.away_team} logo`" class="team-logo" />
+												<div class="team-text">
+													<strong>{{ displayTeamName(game.away_team) }}</strong>
+													<span class="team-record">({{ game.away_record || '-' }})</span>
+												</div>
+											</router-link>
+											<span class="team-score">{{ displayTeamScore(game, 'away') }}</span>
+										</div>
+										<div class="team-row">
+											<router-link :to="teamRoute(league.id, game.home_team)" class="today-team-link">
+												<img v-if="game.home_logo" :src="game.home_logo" :alt="`${game.home_team} logo`" class="team-logo" />
+												<div class="team-text">
+													<strong>{{ displayTeamName(game.home_team) }}</strong>
+													<span class="team-record">({{ game.home_record || '-' }})</span>
+												</div>
+											</router-link>
+											<span class="team-score">{{ displayTeamScore(game, 'home') }}</span>
+										</div>
+									</div>
+									<div class="today-status">
+										<span class="today-label">{{ gameStateLabel(game) }}</span>
+										<span class="today-date">{{ formatGameDate(game) }}</span>
+										<span class="today-date">{{ formatGameDate(game) }}</span>
+										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
 </template>
 
+<script>
+export default {
+	name: 'HomeView',
+}
+</script>
+
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-const loading = ref(true)
-const error = ref('')
-const teams = ref([])
 const apiUrl = process.env.VUE_APP_API_URL || '/api'
+const loadingTodayGames = ref(true)
+const todayGamesError = ref('')
+const todayGamesPayload = ref({})
+const teamsByLeague = ref({})
+let todayGamesIntervalId = null
 
-const parseRecord = (games) => {
-  let wins = 0
-  let losses = 0
-  let ties = 0
-
-  for (const game of games) {
-    if (!game?.score || typeof game.score !== 'string') {
-      continue
-    }
-    const [homeScoreText, awayScoreText] = game.score.split('-')
-    const homeScore = Number(homeScoreText)
-    const awayScore = Number(awayScoreText)
-    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
-      continue
-    }
-
-    const teamScore = game.home ? homeScore : awayScore
-    const opponentScore = game.home ? awayScore : homeScore
-
-    if (teamScore > opponentScore) {
-      wins += 1
-    } else if (teamScore < opponentScore) {
-      losses += 1
-    } else {
-      ties += 1
-    }
-  }
-
-  return ties > 0 ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`
+const normalizeLeagues = (value) => {
+	if (!Array.isArray(value)) {
+		return []
+	}
+	return value
 }
 
-const sections = computed(() => {
-  const grouped = {}
-  for (const team of teams.value) {
-    const league = team.league || 'Other'
-    if (!grouped[league]) {
-      grouped[league] = []
-    }
-    grouped[league].push(team)
-  }
-
-  return Object.entries(grouped)
-    .sort(([leagueA], [leagueB]) => leagueA.localeCompare(leagueB))
-    .map(([league, leagueTeams]) => ({
-      league,
-      teams: leagueTeams.slice(0, 3),
-    }))
+const todayLeagues = computed(() => {
+	const payload = todayGamesPayload.value || {}
+	if (payload.today && Array.isArray(payload.today.leagues)) {
+		return normalizeLeagues(payload.today.leagues)
+	}
+	return normalizeLeagues(payload.leagues)
 })
 
-const loadDashboard = async () => {
-  try {
-    const teamsResponse = await fetch(`${apiUrl}/teams`)
-    if (!teamsResponse.ok) {
-      throw new Error(`API error: ${teamsResponse.status}`)
-    }
-    const teamsData = await teamsResponse.json()
-    const baseTeams = teamsData.teams || []
+const yesterdayLeagues = computed(() => {
+	const payload = todayGamesPayload.value || {}
+	if (payload.yesterday && Array.isArray(payload.yesterday.leagues)) {
+		return normalizeLeagues(payload.yesterday.leagues)
+	}
+	return []
+})
 
-    const details = await Promise.all(
-      baseTeams.map(async (team) => {
-        const response = await fetch(`${apiUrl}/teams/${team.id}`)
-        if (!response.ok) {
-          return {
-            ...team,
-            games: [],
-            record: '0-0',
-            link: '/',
-          }
-        }
+const totalGames = (leagues) => leagues
+	.reduce((count, league) => count + (Array.isArray(league.games) ? league.games.length : 0), 0)
 
-        const detail = await response.json()
-        const lastThirtyGames = (detail.games || [])
-          .filter((game) => game?.status === 'played')
-          .sort((first, second) => {
-            const firstDate = Date.parse(first?.date || '')
-            const secondDate = Date.parse(second?.date || '')
-            return (Number.isFinite(secondDate) ? secondDate : 0) - (Number.isFinite(firstDate) ? firstDate : 0)
-          })
-          .slice(0, 30)
+const hasNoTodayGames = computed(() => totalGames(todayLeagues.value) === 0)
+const hasAnyYesterdayGames = computed(() => totalGames(yesterdayLeagues.value) > 0)
 
-        return {
-          id: team.id,
-          name: detail.name || team.name,
-          league: detail.league || team.league,
-          games: lastThirtyGames,
-          record: parseRecord(lastThirtyGames),
-          link: `/teams/${String(team.league || '').toLowerCase()}/${team.id}`,
-        }
-      })
-    )
+const formatGameTime = (game) => {
+	const rawStart = game?.start_time
+	if (!rawStart) {
+		return 'TBD'
+	}
 
-    teams.value = details
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Unknown error'
-  } finally {
-    loading.value = false
-  }
+	const parsedDate = new Date(rawStart)
+	if (Number.isNaN(parsedDate.getTime())) {
+		return 'TBD'
+	}
+
+	return new Intl.DateTimeFormat(undefined, {
+		hour: 'numeric',
+		minute: '2-digit',
+	}).format(parsedDate)
 }
 
-onMounted(loadDashboard)
+const formatGameDate = (game) => {
+	const rawStart = game?.start_time
+	if (!rawStart) {
+		return 'Date TBD'
+	}
+
+	const parsedDate = new Date(rawStart)
+	if (Number.isNaN(parsedDate.getTime())) {
+		return 'Date TBD'
+	}
+
+	return new Intl.DateTimeFormat(undefined, {
+		month: 'short',
+		day: 'numeric',
+	}).format(parsedDate)
+}
+
+const isCompletedStatus = (status) => {
+	const value = String(status || '').toLowerCase()
+	return value.includes('final') || value.includes('complete') || value.includes('completed')
+}
+
+const isLiveStatus = (status) => {
+	const value = String(status || '').toLowerCase()
+	return (
+		value.includes('in progress')
+		|| value.includes('live')
+		|| value.includes('qtr')
+		|| value.includes('quarter')
+		|| value.includes('period')
+		|| value.includes('inning')
+	)
+}
+
+const formatLiveStatus = (status) => String(status || '')
+	.replace(/\b(\d+)(?:st|nd|rd|th)\s+quarter\b/gi, 'Q$1')
+	.replace(/\bquarter\b/gi, 'Q')
+	.replace(/\s+/g, ' ')
+	.trim()
+
+const gameStateLabel = (game) => {
+	if (isCompletedStatus(game?.status)) {
+		return 'Complete'
+	}
+	if (isLiveStatus(game?.status)) {
+		return formatLiveStatus(game?.status) || 'Live'
+	}
+	return 'Scheduled'
+}
+
+const gameDisplayRank = (game) => {
+	if (isLiveStatus(game?.status)) {
+		return 0
+	}
+	if (isCompletedStatus(game?.status)) {
+		return 2
+	}
+	return 1
+}
+
+const sortGamesForDisplay = (games) => {
+	if (!Array.isArray(games)) {
+		return []
+	}
+
+	return games
+		.map((game, index) => ({ game, index }))
+		.sort((a, b) => {
+			const rankDiff = gameDisplayRank(a.game) - gameDisplayRank(b.game)
+			if (rankDiff !== 0) {
+				return rankDiff
+			}
+			return a.index - b.index
+		})
+		.map(({ game }) => game)
+}
+
+const sortLeaguesForDisplay = (leagues) => leagues.map((league) => ({
+	...league,
+	games: sortGamesForDisplay(league.games),
+}))
+
+const sortedTodayLeagues = computed(() => sortLeaguesForDisplay(todayLeagues.value))
+const sortedYesterdayLeagues = computed(() => sortLeaguesForDisplay(yesterdayLeagues.value))
+
+const displayTeamScore = (game, side) => {
+	if (!isCompletedStatus(game?.status) && !isLiveStatus(game?.status)) {
+		return ''
+	}
+
+	if (side === 'away') {
+		return String(game?.away_score ?? '').trim()
+	}
+
+	return String(game?.home_score ?? '').trim()
+}
+
+const slugify = (value) => String(value || '')
+	.toLowerCase()
+	.replace(/[^a-z0-9]+/g, '-')
+	.replace(/^-+|-+$/g, '')
+
+const buildTeamLookup = (teams) => {
+	const lookup = {}
+	for (const team of teams || []) {
+		const name = String(team?.name || '').toLowerCase().trim()
+		const id = String(team?.id || '').trim()
+		if (name && id) {
+			lookup[name] = id
+		}
+	}
+	return lookup
+}
+
+const teamRoute = (leagueId, teamName) => {
+	const key = String(teamName || '').toLowerCase().trim()
+	const mappedId = teamsByLeague.value?.[leagueId]?.[key]
+	const fallbackId = slugify(teamName)
+	return `/teams/${leagueId}/${mappedId || fallbackId}`
+}
+
+const displayTeamName = (teamName) => {
+	const normalized = String(teamName || '').trim().toLowerCase()
+	if (normalized === 'oklahoma city thunder') {
+		return 'OKC Thunder'
+	}
+	if (normalized === 'oklahoma city') {
+		return 'OKC'
+	}
+	return teamName
+}
+
+const loadLeagueTeams = async () => {
+	const leagues = ['nba', 'nhl', 'mlb']
+	const next = {}
+
+	for (const leagueId of leagues) {
+		try {
+			const response = await fetch(`${apiUrl}/leagues/${leagueId}/teams`)
+			if (!response.ok) {
+				next[leagueId] = {}
+				continue
+			}
+			const data = await response.json()
+			next[leagueId] = buildTeamLookup(data.teams || [])
+		} catch {
+			next[leagueId] = {}
+		}
+	}
+
+	teamsByLeague.value = next
+}
+
+const loadTodayGames = async ({ silent = false } = {}) => {
+	if (!silent) {
+		loadingTodayGames.value = true
+		todayGamesError.value = ''
+	}
+
+	try {
+		const response = await fetch(`${apiUrl}/games/today?t=${Date.now()}`, {
+			cache: 'no-store',
+		})
+		if (!response.ok) {
+			throw new Error(`API error: ${response.status}`)
+		}
+		const data = await response.json()
+		todayGamesPayload.value = data || {}
+	} catch {
+		todayGamesError.value = 'Unable to load games right now.'
+		todayGamesPayload.value = {}
+	} finally {
+		if (!silent) {
+			loadingTodayGames.value = false
+		}
+	}
+}
+
+onMounted(async () => {
+	await Promise.all([loadTodayGames(), loadLeagueTeams()])
+	todayGamesIntervalId = window.setInterval(() => {
+		loadTodayGames({ silent: true })
+	}, 30000)
+})
+
+onUnmounted(() => {
+	if (todayGamesIntervalId) {
+		window.clearInterval(todayGamesIntervalId)
+		todayGamesIntervalId = null
+	}
+})
 </script>
 
 <style scoped>
-.dashboard {
-  background: #fff;
-  border-radius: 20px;
-  padding: 28px 32px;
-  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.08);
+.home {
+	background: #fff;
+	border-radius: 16px;
+	padding: 24px;
+	box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
 }
 
-.dashboard-header h2 {
-  margin: 0 0 6px;
-  font-size: 24px;
+.home p {
+	margin: 0;
+	color: #6b7280;
 }
 
-.dashboard-header p {
-  margin: 0 0 20px;
-  color: #4b5563;
+.today-games h3 {
+	margin: 0 0 10px;
 }
 
-.league-sections {
-  display: grid;
-  gap: 20px;
+.section-heading-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 10px;
 }
 
-.league-section h3 {
-  margin: 0 0 10px;
+.yesterday-heading {
+	margin: 0;
 }
 
-.team-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 14px;
-  margin-bottom: 10px;
+.date-bubble {
+	display: inline-flex;
+	align-items: center;
+	padding: 4px 10px;
+	border-radius: 999px;
+	border: 1px solid #dbe3f0;
+	background: #fff;
+	color: #0f172a;
+	font-size: 12px;
+	font-weight: 600;
 }
 
-.team-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+.yesterday-section {
+	margin-top: 28px;
+	padding: 16px;
+	border: 1px solid #e5e7eb;
+	border-radius: 14px;
+	background: #f9fafb;
 }
 
-.team-link {
-  color: #2563eb;
-  font-weight: 700;
-  text-decoration: none;
+.today-games-error {
+	color: #b91c1c;
 }
 
-.record {
-  font-weight: 700;
-  color: #111827;
+.today-leagues {
+	display: grid;
+	gap: 16px;
 }
 
-.games {
-  display: grid;
-  gap: 8px;
+.today-league h4 {
+	margin: 0 0 8px;
 }
 
-.game {
-  display: grid;
-  grid-template-columns: 110px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  border-radius: 10px;
-  background: #f9fafb;
-  padding: 8px 10px;
-  font-size: 14px;
+.today-empty {
+	color: #6b7280;
+	font-size: 14px;
 }
 
-.status {
-  color: #6b7280;
+.today-list {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.today-game {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 96px;
+	align-items: start;
+	gap: 5px;
+	padding: 10px 12px;
+	border: 1px solid #e5e7eb;
+	border-radius: 10px;
+}
+
+.today-teams {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+}
+
+.team-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 36px;
+	align-items: flex-start;
+	gap: 18px;
+	width: 100%;
+}
+
+.today-team-link {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr);
+	column-gap: 6px;
+	row-gap: 1px;
+	align-items: center;
+	text-decoration: none;
+	color: #111827;
+	min-width: 0;
+}
+
+.team-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.team-text strong {
+	font-size: 13px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.team-record {
+	font-size: 11px;
+	color: #6b7280;
+}
+
+.team-score {
+	font-size: 18px;
+	font-weight: 700;
+	color: #111827;
+	width: 36px;
+	text-align: right;
+	justify-self: end;
+	font-variant-numeric: tabular-nums;
+	line-height: 1;
+	padding-top: 1px;
+}
+
+.today-team-link:hover {
+	text-decoration: underline;
+}
+
+.team-logo {
+	width: 18px;
+	height: 18px;
+	object-fit: contain;
+}
+
+.today-status {
+	text-align: right;
+	font-size: 13px;
+	color: #4b5563;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 2px;
+	width: 96px;
+}
+
+.today-label {
+	font-weight: 600;
+	color: #111827;
+}
+
+.today-time {
+	font-size: 12px;
+}
+
+.today-date {
+	font-size: 12px;
+	color: #6b7280;
+}
+
+@media (max-width: 900px) {
+	.today-list {
+		grid-template-columns: 1fr;
+	}
+
+	.today-game {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.today-status {
+		width: auto;
+	}
 }
 </style>

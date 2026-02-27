@@ -9,12 +9,13 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-For live data, set APISPORTS_KEY before running the backend.
+For live data, set `SPORTS_DATA_SOURCE` to `thesportsdb` (default) or `espn`.
 
 API endpoints:
 - http://localhost:8000/api/health
-- http://localhost:8000/api/teams
-- http://localhost:8000/api/teams/{team_id}
+- http://localhost:8000/api/leagues
+- http://localhost:8000/api/leagues/{league_id}/teams
+- http://localhost:8000/api/leagues/{league_id}/teams/{team_id}
 
 ## Project setup
 ```

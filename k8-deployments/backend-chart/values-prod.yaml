@@ -11,20 +11,20 @@ service:
 
 resources:
   requests:
-    cpu: 50m
-    memory: 128Mi
-  limits:
-    cpu: 250m
+    cpu: 100m
     memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
 
 env:
   SPORTS_DATA_SOURCE: espn
   DATABASE_URL: ""
-  SCORECHECK_SEASON: "2024"
-  SCORECHECK_NBA_SEASON: "2024"
-  SCORECHECK_NHL_SEASON: "2024"
-  SCORECHECK_MLB_SEASON: "2024"
+  SCORECHECK_SEASON: "2025"
+  SCORECHECK_NBA_SEASON: "2025"
+  SCORECHECK_NHL_SEASON: "2025"
+  SCORECHECK_MLB_SEASON: "2026"
 
 database:
-  existingSecretName: "scorecheck-backend-db"
-  existingSecretKey: "DATABASE_URL"
+  existingSecretName: scorecheck-backend-db
+  existingSecretKey: DATABASE_URL

@@ -8,13 +8,10 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
-      - SPORTS_DATA_SOURCE=thesportsdb
-      # Optionally set these for API-Sports support:
-      # - APISPORTS_KEY=your_key_here
-      # - APISPORTS_SEASON=2024
-      # - APISPORTS_NBA_SEASON=2024
-      # - APISPORTS_NHL_SEASON=2024
-      # - APISPORTS_MLB_SEASON=2024
+      - SPORTS_DATA_SOURCE=espn
+      - DATABASE_URL=sqlite:////app/data/scorecheck.db
+    volumes:
+      - ../data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/health')"]
       interval: 30s
@@ -30,21 +27,19 @@ services:
       context: ..
       dockerfile: docker/frontend/Dockerfile
       args:
-        VUE_APP_API_URL: http://localhost:8000/api
+        VUE_APP_API_URL: /api
     container_name: scorecheck-frontend
     ports:
       - "8080:8080"
-    environment:
-      - VUE_APP_API_URL=http://backend:8000/api
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 20s
     networks:
       - scorecheck-network
     restart: unless-stopped

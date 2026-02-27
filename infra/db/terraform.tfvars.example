@@ -1,0 +1,28 @@
+region                    = "us-east-1"
+project_name              = "scorecheck"
+environment               = "prod"
+
+# Use the same VPC and subnets as EKS
+vpc_id                    = "vpc-xxxxxxxx"
+subnet_ids                = ["subnet-aaaa", "subnet-bbbb", "subnet-cccc"]
+
+# Allow EKS traffic to DB (recommended)
+allowed_security_group_ids = ["sg-eks-workers-or-cluster"]
+
+# Optionally allow CIDRs (leave empty unless needed)
+allowed_cidr_blocks       = []
+
+db_name                   = "scorecheck"
+db_username               = "scorecheck"
+
+instance_class            = "db.t4g.micro"
+allocated_storage         = 20
+max_allocated_storage     = 100
+engine_version            = "16.3"
+
+multi_az                  = false
+deletion_protection       = true
+backup_retention_period   = 7
+skip_final_snapshot       = false
+publicly_accessible       = false
+storage_encrypted         = true

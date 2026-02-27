@@ -1,0 +1,21 @@
+replicaCount: 1
+
+image:
+  repository: 437537529252.dkr.ecr.us-east-1.amazonaws.com/scorecheck-frontend
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 150m
+    memory: 128Mi
+
+env:
+  VUE_APP_API_URL: https://staging.scorecheck.ca/api
