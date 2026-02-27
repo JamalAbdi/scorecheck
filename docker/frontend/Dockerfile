@@ -1,18 +1,18 @@
 # Multi-stage build for frontend
-FROM node:18-alpine AS builder
+FROM node:14-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Build-time API base URL for Vue app
+# Build-time API base URL for Vue app (uses relative path through nginx proxy)
 ARG VUE_APP_API_URL=/api
 ENV VUE_APP_API_URL=$VUE_APP_API_URL
 
 # Copy package files from src/frontend when building from repo root context
 COPY src/frontend/package*.json ./
 
-# Install dependencies - fail if install fails
-RUN npm install
+# Install dependencies
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY src/frontend/ .
@@ -21,16 +21,13 @@ COPY src/frontend/ .
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine
-
-# Install serve to run the production build
-RUN npm install -g serve
-
-# Set working directory
-WORKDIR /app
+FROM nginx:alpine
 
 # Copy built application from builder
-COPY --from=builder /app/dist .
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY src/frontend/nginx.conf /etc/nginx/nginx.conf
 
 # Expose port
 EXPOSE 8080
@@ -39,5 +36,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --quiet --tries=1 --spider http://localhost:8080/ || exit 1
 
-# Start the application
-CMD ["serve", "-s", ".", "-l", "8080"]
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

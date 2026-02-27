@@ -86,7 +86,6 @@ docker run -p 8080:8080 scorecheck-frontend &
 Edit `docker/docker-compose.yml` to:
 - Change exposed ports
 - Add environment variables
-- Configure API-Sports key for full NBA support
 - Adjust resource limits
 - Modify restart policies
 
@@ -96,9 +95,7 @@ Key variables in docker-compose.yml:
 
 ```yaml
 environment:
-  - SPORTS_DATA_SOURCE=thesportsdb
-  # - APISPORTS_KEY=your_key_here
-  # - APISPORTS_SEASON=2024
+  - SPORTS_DATA_SOURCE=espn
 ```
 
 ## Common Commands
@@ -131,7 +128,6 @@ docker-compose -f docker/docker-compose.yml ps
 
 For production:
 - Set specific version tags (not `latest`)
-- Use Docker secrets for API keys
 - Configure resource limits
 - Use a reverse proxy (nginx)
 - Set up logging aggregation
@@ -159,5 +155,4 @@ For production:
 1. Configure environment variables in `docker/docker-compose.yml`
 2. Run `docker-compose up --build`
 3. Access http://localhost:8080
-4. Set `APISPORTS_KEY` to enable full data support
-5. Deploy to your infrastructure (Docker Swarm, Kubernetes, etc.)
+4. Deploy to your infrastructure (Docker Swarm, Kubernetes, etc.)

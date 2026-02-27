@@ -69,12 +69,8 @@ docker run -p 8080:8080 scorecheck-frontend:latest
 
 The backend service supports the following environment variables in `docker-compose.yml`:
 
-- `SPORTS_DATA_SOURCE`: Data source connector (default: `thesportsdb`)
-- `APISPORTS_KEY`: API-Sports API key (optional, for full data support)
-- `APISPORTS_SEASON`: Sports season for API-Sports (default: `2024`)
-- `APISPORTS_NBA_SEASON`: NBA season override (optional)
-- `APISPORTS_NHL_SEASON`: NHL season override (optional)
-- `APISPORTS_MLB_SEASON`: MLB season override (optional)
+- `SPORTS_DATA_SOURCE`: Data source connector (`thesportsdb` or `espn`; default: `thesportsdb`)
+- `DATABASE_URL`: Backend database connection string (defaults to local SQLite)
 
 Edit `docker/docker-compose.yml` to configure these as needed.
 

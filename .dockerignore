@@ -12,3 +12,5 @@ dist/
 build/
 __pycache__
 *.py[cod]
+src/frontend/node_modules/
+src/frontend/dist/

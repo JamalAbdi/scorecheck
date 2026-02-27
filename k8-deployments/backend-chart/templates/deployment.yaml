@@ -23,20 +23,23 @@ spec:
           env:
             - name: SPORTS_DATA_SOURCE
               value: {{ .Values.env.SPORTS_DATA_SOURCE | quote }}
-            - name: APISPORTS_KEY
+            - name: DATABASE_URL
+{{- if .Values.database.existingSecretName }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.apiSportsSecretName | quote }}
-                  key: APISPORTS_KEY
-                  optional: true
-            - name: APISPORTS_SEASON
-              value: {{ .Values.env.APISPORTS_SEASON | quote }}
-            - name: APISPORTS_NBA_SEASON
-              value: {{ .Values.env.APISPORTS_NBA_SEASON | quote }}
-            - name: APISPORTS_NHL_SEASON
-              value: {{ .Values.env.APISPORTS_NHL_SEASON | quote }}
-            - name: APISPORTS_MLB_SEASON
-              value: {{ .Values.env.APISPORTS_MLB_SEASON | quote }}
+                  name: {{ .Values.database.existingSecretName | quote }}
+                  key: {{ .Values.database.existingSecretKey | quote }}
+{{- else }}
+              value: {{ .Values.env.DATABASE_URL | quote }}
+{{- end }}
+            - name: SCORECHECK_SEASON
+              value: {{ .Values.env.SCORECHECK_SEASON | quote }}
+            - name: SCORECHECK_NBA_SEASON
+              value: {{ .Values.env.SCORECHECK_NBA_SEASON | quote }}
+            - name: SCORECHECK_NHL_SEASON
+              value: {{ .Values.env.SCORECHECK_NHL_SEASON | quote }}
+            - name: SCORECHECK_MLB_SEASON
+              value: {{ .Values.env.SCORECHECK_MLB_SEASON | quote }}
           resources:
 {{- toYaml .Values.resources | nindent 12 }}
           readinessProbe:

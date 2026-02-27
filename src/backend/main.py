@@ -1,13 +1,19 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import requests
+from sqlalchemy import create_engine, Column, String, Text, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-from sports_data.api_sports import ApiSportsConnector, ApiSportsError
+from sports_data.espn import ESPNConnector
 from sports_data.thesportsdb import TheSportsDBConnector, TheSportsDBError
 
 logger = logging.getLogger(__name__)
@@ -23,38 +29,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-APISPORTS_KEY = os.environ.get("APISPORTS_KEY", "").strip()
-DEFAULT_SEASON = os.environ.get("APISPORTS_SEASON", "2024").strip()
-SPORTS_DATA_SOURCE = os.environ.get("SPORTS_DATA_SOURCE", "thesportsdb").lower()
+DEFAULT_SEASON = os.environ.get("SCORECHECK_SEASON", "2024").strip()
+SPORTS_DATA_SOURCE = os.environ.get("SPORTS_DATA_SOURCE", "espn").lower()
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./scorecheck.db").strip()
 
-if not APISPORTS_KEY:
-    logger.warning("APISPORTS_KEY not set. Using fallback static data.")
-else:
-    logger.info("APISPORTS_KEY is configured.")
+_timeout_value = os.environ.get("SCORECHECK_UPSTREAM_TIMEOUT_SECONDS", "4.0").strip()
+try:
+    UPSTREAM_TIMEOUT_SECONDS = max(1.0, float(_timeout_value))
+except ValueError:
+    UPSTREAM_TIMEOUT_SECONDS = 4.0
 
-TEAM_CONFIG: Dict[str, Dict[str, str]] = {
-    "raptors": {
-        "name": "Toronto Raptors",
-        "league": "NBA",
-        "base_url": "https://v2.nba.api-sports.io",
-        "search": "Raptors",
-        "season_env": "APISPORTS_NBA_SEASON",
-    },
-    "maple-leafs": {
-        "name": "Toronto Maple Leafs",
-        "league": "NHL",
-        "base_url": "https://v1.hockey.api-sports.io",
-        "search": "Maple Leafs",
-        "season_env": "APISPORTS_NHL_SEASON",
-    },
-    "blue-jays": {
-        "name": "Toronto Blue Jays",
-        "league": "MLB",
-        "base_url": "https://v1.baseball.api-sports.io",
-        "search": "Blue Jays",
-        "season_env": "APISPORTS_MLB_SEASON",
-    },
-}
+# Database setup
+Base = declarative_base()
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args=({"check_same_thread": False} if "sqlite" in DATABASE_URL else {}),
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+class ApiCache(Base):
+    __tablename__ = "api_cache"
+    cache_key = Column(String, primary_key=True, index=True)
+    payload = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+Base.metadata.create_all(bind=engine)
 
 LEAGUE_CONFIG: Dict[str, Dict[str, Optional[str]]] = {
     "nba": {
@@ -71,52 +78,142 @@ LEAGUE_CONFIG: Dict[str, Dict[str, Optional[str]]] = {
     },
 }
 
-TEAM_CACHE: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL_SECONDS = 60
+TEAM_SEARCH_ALIASES: Dict[tuple[str, str], List[str]] = {
+    ("nhl", "utah-mammoth"): ["Utah Hockey Club", "Arizona Coyotes"],
+    ("mlb", "oakland-athletics"): ["Athletics", "Sacramento Athletics"],
+}
+
 LEAGUE_TEAMS_CACHE: Dict[str, Dict[str, Any]] = {}
 LEAGUE_TEAMS_TTL_SECONDS = 3600
+LEAGUES_TTL_SECONDS = 300
+LEAGUE_TEAM_DETAILS_TTL_SECONDS = 300
+GAME_PLAYERS_TTL_SECONDS = 300
+TODAY_GAMES_TTL_SECONDS = 30
+
+DB_CACHE_ENABLED = True
+logger.info("Database cache enabled using SQLAlchemy.")
 
 
-def _get_season(team_key: str) -> str:
-    env_key = TEAM_CONFIG[team_key]["season_env"]
-    return os.environ.get(env_key, DEFAULT_SEASON)
+def _active_season_for_league(league_name: str) -> str:
+    now = datetime.now(timezone.utc)
+    year = now.year
+    month = now.month
+
+    if league_name in ("NBA", "NHL"):
+        if month >= 9:
+            return f"{year}-{year + 1}"
+        return f"{year - 1}-{year}"
+
+    if league_name == "MLB":
+        if month < 3:
+            return str(year - 1)
+        return str(year)
+
+    return DEFAULT_SEASON
 
 
-def _connector_for(team_key: str):
-    if SPORTS_DATA_SOURCE == "fallback":
-        return None  # Use fallback data
-    elif SPORTS_DATA_SOURCE == "thesportsdb":
-        # TheSportsDB supports NHL, MLB, Soccer but NOT NBA
-        if TEAM_CONFIG[team_key]["league"] == "NBA":
-            # NBA teams must use API-Sports
-            if not APISPORTS_KEY:
-                raise ApiSportsError(f"API-Sports key required for NBA teams. TheSportsDB does not support NBA.")
-            return ApiSportsConnector(
-                APISPORTS_KEY,
-                base_url=TEAM_CONFIG[team_key]["base_url"],
+def _cache_get_json(cache_key: str) -> Optional[Any]:
+    """Get cached data from SQLite/PostgreSQL."""
+    try:
+        session = SessionLocal()
+        cache_entry = (
+            session.query(ApiCache)
+            .filter(
+                ApiCache.cache_key == cache_key,
+                ApiCache.expires_at > datetime.now(timezone.utc),
             )
-        return TheSportsDBConnector()
-    else:
-        return ApiSportsConnector(
-            APISPORTS_KEY,
-            base_url=TEAM_CONFIG[team_key]["base_url"],
+            .first()
         )
+        session.close()
+        if not cache_entry:
+            return None
+        return json.loads(cache_entry.payload)
+    except Exception as e:
+        logger.warning(f"Cache get failed for {cache_key}: {e}")
+        return None
+
+
+def _cache_set_json(cache_key: str, payload: Any, ttl_seconds: int) -> None:
+    """Set cached data in SQLite/PostgreSQL."""
+    try:
+        session = SessionLocal()
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        cache_entry = (
+            session.query(ApiCache).filter(ApiCache.cache_key == cache_key).first()
+        )
+
+        if cache_entry:
+            cache_entry.payload = json.dumps(payload)
+            cache_entry.expires_at = expires_at
+            cache_entry.updated_at = datetime.now(timezone.utc)
+        else:
+            cache_entry = ApiCache(
+                cache_key=cache_key,
+                payload=json.dumps(payload),
+                expires_at=expires_at,
+                updated_at=datetime.now(timezone.utc),
+            )
+            session.add(cache_entry)
+
+        session.commit()
+        session.close()
+    except Exception as e:
+        logger.warning(f"Cache set failed for {cache_key}: {e}")
+        session.close()
 
 
 def _slugify(value: str) -> str:
     import re
+
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug
 
 
-def _merge_players(base_players: List[Dict[str, Any]], extra_players: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    merged: Dict[str, Dict[str, Any]] = {player["name"]: player for player in base_players if player.get("name")}
+def _merge_players(
+    base_players: List[Dict[str, Any]], extra_players: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {
+        player["name"]: player for player in base_players if player.get("name")
+    }
     for player in extra_players:
         name = player.get("name")
         if not name or name in merged:
             continue
         merged[name] = player
     return list(merged.values())
+
+
+def _team_search_candidates(league_key: str, team_name: str) -> List[str]:
+    base_name = str(team_name or "").strip()
+    if not base_name:
+        return []
+
+    alias_key = (league_key, _slugify(base_name))
+    aliases = TEAM_SEARCH_ALIASES.get(alias_key, [])
+
+    candidates: List[str] = []
+    seen = set()
+    for candidate in [base_name, *aliases]:
+        cleaned = str(candidate or "").strip()
+        if not cleaned:
+            continue
+        normalized = _slugify(cleaned)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        candidates.append(cleaned)
+
+    return candidates
+
+
+def _logo_for_team(
+    logos_by_name: Dict[str, str], league_key: str, team_name: str
+) -> str:
+    for candidate in _team_search_candidates(league_key, team_name):
+        logo = logos_by_name.get(candidate.lower())
+        if logo:
+            return logo
+    return ""
 
 
 def _fetch_nhl_roster(team_name: str) -> List[Dict[str, Any]]:
@@ -150,7 +247,9 @@ def _fetch_nhl_roster(team_name: str) -> List[Dict[str, Any]]:
             players.append(
                 {
                     "name": name,
-                    "position": position.get("abbreviation") or position.get("name") or "-",
+                    "position": position.get("abbreviation")
+                    or position.get("name")
+                    or "-",
                     "stats": {},
                 }
             )
@@ -191,7 +290,9 @@ def _fetch_mlb_roster(team_name: str, season: str) -> List[Dict[str, Any]]:
             players.append(
                 {
                     "name": name,
-                    "position": position.get("abbreviation") or position.get("name") or "-",
+                    "position": position.get("abbreviation")
+                    or position.get("name")
+                    or "-",
                     "stats": {},
                 }
             )
@@ -201,9 +302,42 @@ def _fetch_mlb_roster(team_name: str, season: str) -> List[Dict[str, Any]]:
 
 
 def _static_league_teams() -> Dict[str, List[Dict[str, Any]]]:
+    nba_teams = [
+        "Atlanta Hawks",
+        "Boston Celtics",
+        "Brooklyn Nets",
+        "Charlotte Hornets",
+        "Chicago Bulls",
+        "Cleveland Cavaliers",
+        "Dallas Mavericks",
+        "Denver Nuggets",
+        "Detroit Pistons",
+        "Golden State Warriors",
+        "Houston Rockets",
+        "Indiana Pacers",
+        "LA Clippers",
+        "Los Angeles Lakers",
+        "Memphis Grizzlies",
+        "Miami Heat",
+        "Milwaukee Bucks",
+        "Minnesota Timberwolves",
+        "New Orleans Pelicans",
+        "New York Knicks",
+        "Oklahoma City Thunder",
+        "Orlando Magic",
+        "Philadelphia 76ers",
+        "Phoenix Suns",
+        "Portland Trail Blazers",
+        "Sacramento Kings",
+        "San Antonio Spurs",
+        "Toronto Raptors",
+        "Utah Jazz",
+        "Washington Wizards",
+    ]
+
     nhl_teams = [
         "Anaheim Ducks",
-        "Arizona Coyotes",
+        "Utah Mammoth",
         "Boston Bruins",
         "Buffalo Sabres",
         "Calgary Flames",
@@ -270,13 +404,23 @@ def _static_league_teams() -> Dict[str, List[Dict[str, Any]]]:
     ]
 
     return {
-        "nhl": [{"id": _slugify(name), "name": name, "league": "NHL"} for name in nhl_teams],
-        "mlb": [{"id": _slugify(name), "name": name, "league": "MLB"} for name in mlb_teams],
+        "nba": [
+            {"id": _slugify(name), "name": name, "league": "NBA"}
+            for name in sorted(nba_teams)
+        ],
+        "nhl": [
+            {"id": _slugify(name), "name": name, "league": "NHL"}
+            for name in sorted(nhl_teams)
+        ],
+        "mlb": [
+            {"id": _slugify(name), "name": name, "league": "MLB"}
+            for name in sorted(mlb_teams)
+        ],
     }
 
 
 def _fetch_thesportsdb_league_teams(league_name: str) -> List[Dict[str, Any]]:
-    connector = TheSportsDBConnector()
+    connector = TheSportsDBConnector(timeout_seconds=UPSTREAM_TIMEOUT_SECONDS)
 
     # First try direct league lookup
     data = connector.get_teams_by_league(league_name)
@@ -309,187 +453,51 @@ def _fetch_thesportsdb_league_teams(league_name: str) -> List[Dict[str, Any]]:
     return teams
 
 
-def _extract_team(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    response = data.get("response") or []
-    for item in response:
-        if isinstance(item, dict):
-            if isinstance(item.get("team"), dict):
-                return item.get("team")
-            if "name" in item:
-                return item
-    return None
+def _fetch_espn_team_logos(league_name: str) -> Dict[str, str]:
+    connector = ESPNConnector(
+        league_name=league_name,
+        timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+    )
 
+    data = connector.get_teams(season=DEFAULT_SEASON)
+    response = data.get("response") if isinstance(data, dict) else None
+    if not isinstance(response, list):
+        return {}
 
-def _flatten_stats(stats: Dict[str, Any]) -> Dict[str, Any]:
-    flattened: Dict[str, Any] = {}
-    for key, value in stats.items():
-        if isinstance(value, (int, float)):
-            flattened[key] = value
-    return flattened
-
-
-def _extract_players(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    response = data.get("response") or []
-    players: List[Dict[str, Any]] = []
+    team_logos: Dict[str, str] = {}
     for item in response:
         if not isinstance(item, dict):
             continue
-        player_info = item.get("player") if isinstance(item.get("player"), dict) else item
-        name = player_info.get("name") or " ".join(
-            part for part in [player_info.get("firstname"), player_info.get("lastname")] if part
-        )
-        position = player_info.get("position") or player_info.get("pos") or "-"
-
-        stats_source: Dict[str, Any] = {}
-        statistics = item.get("statistics")
-        if isinstance(statistics, list) and statistics:
-            if isinstance(statistics[0], dict):
-                stats_source = statistics[0]
-        elif isinstance(item.get("stats"), dict):
-            stats_source = item.get("stats")
-
-        stats = _flatten_stats(stats_source)
-
-        players.append(
-            {
-                "name": name or "Unknown",
-                "position": position,
-                "stats": stats,
-            }
-        )
-
-    return players
-
-
-def _score_value(value: Any) -> Optional[float]:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, dict):
-        for key in ("total", "points", "goals", "runs", "score"):
-            if isinstance(value.get(key), (int, float)):
-                return float(value.get(key))
-    return None
-
-
-def _extract_score(item: Dict[str, Any]) -> Optional[str]:
-    scores = item.get("scores") or item.get("score")
-    if isinstance(scores, dict):
-        home_score = _score_value(scores.get("home"))
-        away_score = _score_value(scores.get("away"))
-        if home_score is not None and away_score is not None:
-            return f"{int(home_score)}-{int(away_score)}"
-    if isinstance(scores, (int, float)):
-        return str(scores)
-    return None
-
-
-def _extract_games(data: Dict[str, Any], team_name: str) -> List[Dict[str, Any]]:
-    response = data.get("response") or []
-    games: List[Dict[str, Any]] = []
-    for item in response:
-        if not isinstance(item, dict):
+        team = item.get("team") if isinstance(item.get("team"), dict) else item
+        if not isinstance(team, dict):
             continue
 
-        date = item.get("date")
-        if not date and isinstance(item.get("game"), dict):
-            date = item.get("game", {}).get("date")
+        team_name = str(team.get("displayName") or team.get("name") or "").strip()
+        if not team_name:
+            continue
 
-        home_name = None
-        away_name = None
-        teams = item.get("teams")
-        if isinstance(teams, dict):
-            home_name = (teams.get("home") or {}).get("name")
-            away_name = (teams.get("away") or {}).get("name")
+        logo = ""
+        logos = team.get("logos")
+        if isinstance(logos, list):
+            for logo_item in logos:
+                if not isinstance(logo_item, dict):
+                    continue
+                href = str(logo_item.get("href") or "").strip()
+                if href:
+                    logo = href
+                    break
+        if not logo:
+            abbreviation = str(team.get("abbreviation") or "").strip().lower()
+            if abbreviation:
+                league_code = str(connector._path_info.get("league") or "")
+                logo = (
+                    f"https://a.espncdn.com/i/teamlogos/{league_code}/500/"
+                    f"scoreboard/{abbreviation}.png"
+                )
 
-        home = None
-        opponent = None
-        if home_name and away_name:
-            if team_name.lower() == home_name.lower():
-                home = True
-                opponent = away_name
-            elif team_name.lower() == away_name.lower():
-                home = False
-                opponent = home_name
+        team_logos[team_name.lower()] = logo
 
-        score = _extract_score(item)
-        status = "played" if score else "upcoming"
-
-        games.append(
-            {
-                "date": date or "",
-                "opponent": opponent or "TBD",
-                "home": bool(home) if home is not None else False,
-                "status": status,
-                "score": score,
-            }
-        )
-
-    return games[:10]
-
-
-def _fallback_team(team_id: str) -> Dict[str, Any]:
-    config = TEAM_CONFIG[team_id]
-    
-    # Static fallback data with players and games
-    fallback_data = {
-        "raptors": {
-            "id": team_id,
-            "name": "Toronto Raptors",
-            "league": "NBA",
-            "players": [
-                {"name": "Scottie Barnes", "position": "F", "stats": {"points": 19.5, "rebounds": 8.1, "assists": 6.2}},
-                {"name": "RJ Barrett", "position": "G", "stats": {"points": 18.1, "rebounds": 5.4, "assists": 3.1}},
-                {"name": "Immanuel Quickley", "position": "G", "stats": {"points": 17.2, "rebounds": 4.3, "assists": 5.9}},
-            ],
-            "games": [
-                {"date": "2026-02-10", "opponent": "Boston Celtics", "home": True, "status": "played", "score": "112-105"},
-                {"date": "2026-02-13", "opponent": "Miami Heat", "home": False, "status": "played", "score": "98-101"},
-                {"date": "2026-02-25", "opponent": "Chicago Bulls", "home": True, "status": "upcoming", "score": None},
-            ],
-            "source": "static",
-        },
-        "maple-leafs": {
-            "id": team_id,
-            "name": "Toronto Maple Leafs",
-            "league": "NHL",
-            "players": [
-                {"name": "Auston Matthews", "position": "C", "stats": {"goals": 42, "assists": 28, "points": 70}},
-                {"name": "Mitch Marner", "position": "RW", "stats": {"goals": 18, "assists": 49, "points": 67}},
-                {"name": "William Nylander", "position": "RW", "stats": {"goals": 31, "assists": 34, "points": 65}},
-            ],
-            "games": [
-                {"date": "2026-02-12", "opponent": "Montreal Canadiens", "home": True, "status": "played", "score": "4-2"},
-                {"date": "2026-02-15", "opponent": "Ottawa Senators", "home": False, "status": "played", "score": "3-5"},
-                {"date": "2026-02-23", "opponent": "Boston Bruins", "home": True, "status": "upcoming", "score": None},
-            ],
-            "source": "static",
-        },
-        "blue-jays": {
-            "id": team_id,
-            "name": "Toronto Blue Jays",
-            "league": "MLB",
-            "players": [
-                {"name": "Vladimir Guerrero Jr.", "position": "1B", "stats": {"avg": 0.291, "hr": 32, "rbi": 98}},
-                {"name": "Bo Bichette", "position": "SS", "stats": {"avg": 0.285, "hr": 24, "rbi": 86}},
-                {"name": "George Springer", "position": "OF", "stats": {"avg": 0.271, "hr": 22, "rbi": 73}},
-            ],
-            "games": [
-                {"date": "2026-02-08", "opponent": "New York Yankees", "home": False, "status": "played", "score": "6-4"},
-                {"date": "2026-02-11", "opponent": "Tampa Bay Rays", "home": True, "status": "played", "score": "2-5"},
-                {"date": "2026-02-27", "opponent": "Baltimore Orioles", "home": True, "status": "upcoming", "score": None},
-            ],
-            "source": "static",
-        },
-    }
-    
-    return fallback_data.get(team_id, {
-        "id": team_id,
-        "name": config["name"],
-        "league": config["league"],
-        "players": [],
-        "games": [],
-        "source": "static",
-    })
+    return team_logos
 
 
 @app.get("/api/health")
@@ -499,13 +507,19 @@ def health_check() -> dict:
 
 @app.get("/api/leagues")
 def get_leagues() -> dict:
+    cache_key = f"leagues:{SPORTS_DATA_SOURCE}:{DEFAULT_SEASON}"
+    cached_response = _cache_get_json(cache_key)
+    if isinstance(cached_response, dict):
+        return cached_response
+
     leagues = []
+    static_teams = _static_league_teams()
     for league_id, config in LEAGUE_CONFIG.items():
         available = True
         if SPORTS_DATA_SOURCE == "thesportsdb":
-            available = bool(config.get("thesportsdb"))
-        elif SPORTS_DATA_SOURCE == "api-sports":
-            available = bool(APISPORTS_KEY)
+            available = bool(config.get("thesportsdb")) or bool(
+                static_teams.get(league_id)
+            )
         leagues.append(
             {
                 "id": league_id,
@@ -513,30 +527,63 @@ def get_leagues() -> dict:
                 "available": available,
             }
         )
-    return {"leagues": leagues}
+    response = {"leagues": leagues}
+    _cache_set_json(cache_key, response, LEAGUES_TTL_SECONDS)
+    return response
 
 
 @app.get("/api/leagues/{league_id}/teams")
 def get_league_teams(league_id: str) -> dict:
     league_key = league_id.lower().strip()
+    cache_key = (
+        f"league_teams:v2:{SPORTS_DATA_SOURCE}:{league_key}:{DEFAULT_SEASON}"
+    )
+    cached_response = _cache_get_json(cache_key)
+    if isinstance(cached_response, dict):
+        return cached_response
+
     config = LEAGUE_CONFIG.get(league_key)
     if not config:
         raise HTTPException(status_code=404, detail="League not found")
 
     static_teams = _static_league_teams().get(league_key)
     if static_teams:
-        return {
+        teams = [dict(team) for team in static_teams]
+        source = "static"
+
+        if SPORTS_DATA_SOURCE == "espn":
+            try:
+                logos_by_name = _fetch_espn_team_logos(config["name"])
+                for team in teams:
+                    team_name = str(team.get("name") or "")
+                    team["logo"] = _logo_for_team(logos_by_name, league_key, team_name)
+                source = "espn"
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enrich league teams with ESPN logos "
+                    f"for {league_key}: {exc}"
+                )
+
+        response = {
             "league": config["name"],
-            "teams": static_teams,
-            "source": "static",
+            "teams": teams,
+            "source": source,
         }
+        _cache_set_json(cache_key, response, LEAGUE_TEAMS_TTL_SECONDS)
+        return response
 
     if SPORTS_DATA_SOURCE != "thesportsdb":
-        raise HTTPException(status_code=400, detail="League team listing is only supported with TheSportsDB")
+        raise HTTPException(
+            status_code=400,
+            detail="League team listing is only supported with TheSportsDB",
+        )
 
     league_name = config.get("thesportsdb")
     if not league_name:
-        raise HTTPException(status_code=400, detail=f"League {config['name']} is not available via TheSportsDB")
+        raise HTTPException(
+            status_code=400,
+            detail=f"League {config['name']} is not available via TheSportsDB",
+        )
 
     cached = LEAGUE_TEAMS_CACHE.get(league_key)
     if cached and time.time() - cached["timestamp"] < LEAGUE_TEAMS_TTL_SECONDS:
@@ -544,199 +591,316 @@ def get_league_teams(league_id: str) -> dict:
     else:
         try:
             teams = _fetch_thesportsdb_league_teams(league_name)
-            LEAGUE_TEAMS_CACHE[league_key] = {"timestamp": time.time(), "teams": teams}
+            LEAGUE_TEAMS_CACHE[league_key] = {
+                "timestamp": time.time(),
+                "teams": teams,
+            }
         except TheSportsDBError as exc:
             if "429" in str(exc) and cached:
-                logger.warning(f"Rate limited while fetching {league_name}; serving cached data.")
+                logger.warning(
+                    f"Rate limited while fetching {league_name}; serving cached data."
+                )
                 teams = cached["teams"]
             else:
-                raise HTTPException(status_code=429, detail="Rate limited by TheSportsDB. Please retry.")
-    return {
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limited by TheSportsDB. Please retry.",
+                )
+    response = {
         "league": config["name"],
         "teams": teams,
         "source": SPORTS_DATA_SOURCE,
     }
+    _cache_set_json(cache_key, response, LEAGUE_TEAMS_TTL_SECONDS)
+    return response
+
+
+@app.get("/api/games/today")
+def get_today_games(include_yesterday: bool = True) -> dict:
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today_key = now_et.strftime("%Y%m%d")
+    yesterday_key = (now_et - timedelta(days=1)).strftime("%Y%m%d")
+    yesterday_date = (now_et - timedelta(days=1)).date().isoformat()
+    include_yesterday_flag = int(include_yesterday)
+    cache_key = (
+        f"today_games:espn:{today_key}:"
+        f"include_yesterday:{include_yesterday_flag}"
+    )
+    cached_response = _cache_get_json(cache_key)
+    if isinstance(cached_response, dict):
+        return cached_response
+
+    today_leagues: List[Dict[str, Any]] = []
+    yesterday_leagues: List[Dict[str, Any]] = []
+    for league_id, config in LEAGUE_CONFIG.items():
+        connector = ESPNConnector(
+            league_name=config["name"],
+            timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+        )
+        today_games: List[Dict[str, Any]] = []
+        yesterday_games: List[Dict[str, Any]] = []
+        try:
+            scoreboard = connector.get_scoreboard(date=today_key)
+            today_games = connector.extract_scoreboard_games(scoreboard)
+        except Exception as exc:
+            logger.warning(
+                f"Failed to fetch today's games for {league_id}: {exc}"
+            )
+
+        if include_yesterday:
+            try:
+                yesterday_scoreboard = connector.get_scoreboard(
+                    date=yesterday_key
+                )
+                yesterday_games = connector.extract_scoreboard_games(
+                    yesterday_scoreboard
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to fetch yesterday's games for {league_id}: {exc}"
+                )
+
+        today_leagues.append(
+            {
+                "id": league_id,
+                "name": config["name"],
+                "games": today_games,
+            }
+        )
+        yesterday_leagues.append(
+            {
+                "id": league_id,
+                "name": config["name"],
+                "games": yesterday_games,
+            }
+        )
+
+    response = {
+        "date": now_et.date().isoformat(),
+        "today_key": today_key,
+        "yesterday_key": yesterday_key,
+        "include_yesterday": include_yesterday,
+        "source": "espn",
+        "today": {
+            "date": now_et.date().isoformat(),
+            "key": today_key,
+            "leagues": today_leagues,
+        },
+        "yesterday": {
+            "date": yesterday_date,
+            "key": yesterday_key,
+            "leagues": yesterday_leagues,
+        },
+        "leagues": today_leagues,
+    }
+    _cache_set_json(cache_key, response, TODAY_GAMES_TTL_SECONDS)
+    return response
 
 
 @app.get("/api/leagues/{league_id}/teams/{team_id}")
 def get_league_team(league_id: str, team_id: str) -> dict:
     league_key = league_id.lower().strip()
+    cache_key = (
+        f"league_team:v3:{SPORTS_DATA_SOURCE}:{league_key}:{team_id}:{DEFAULT_SEASON}"
+    )
+    cached_response = _cache_get_json(cache_key)
+    if isinstance(cached_response, dict):
+        return cached_response
+
+    config = LEAGUE_CONFIG.get(league_key)
+    if not config:
+        raise HTTPException(status_code=404, detail="League not found")
+
+    if SPORTS_DATA_SOURCE not in ("thesportsdb", "espn"):
+        raise HTTPException(status_code=400, detail="Unsupported data source")
+
+    static_teams = _static_league_teams().get(league_key)
+    if not static_teams:
+        raise HTTPException(status_code=404, detail="League teams not found")
+
+    matched = next((team for team in static_teams if team["id"] == team_id), None)
+    if not matched:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    team_name = matched["name"]
+    team_search_candidates = _team_search_candidates(league_key, team_name)
+    active_season = _active_season_for_league(config["name"])
+
+    connector_order = [SPORTS_DATA_SOURCE, "espn", "thesportsdb"]
+    seen_sources = set()
+    attempts: List[tuple[str, Any]] = []
+
+    for source_name in connector_order:
+        if source_name in seen_sources:
+            continue
+        seen_sources.add(source_name)
+
+        if source_name == "thesportsdb" and not config.get("thesportsdb"):
+            attempts.append((source_name, "league unavailable"))
+            continue
+
+        if source_name == "espn":
+            connector = ESPNConnector(
+                league_name=config["name"],
+                timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+            )
+        elif source_name == "thesportsdb":
+            connector = TheSportsDBConnector(
+                timeout_seconds=UPSTREAM_TIMEOUT_SECONDS
+            )
+        else:
+            continue
+
+        try:
+            team_info = None
+            resolved_search_name = team_name
+            for search_name in team_search_candidates:
+                team_search = connector.get_teams(
+                    season=DEFAULT_SEASON, search=search_name
+                )
+                parsed_team = connector.extract_team(team_search)
+                external_id = (parsed_team or {}).get("id")
+                if external_id:
+                    team_info = parsed_team
+                    resolved_search_name = search_name
+                    break
+
+            external_id = (team_info or {}).get("id")
+            team_logo = (team_info or {}).get("logo") or ""
+            if not external_id:
+                attempts.append((source_name, "team id not found"))
+                continue
+
+            resolved_team_name = str(
+                (team_info or {}).get("name") or resolved_search_name or team_name
+            )
+
+            players_response = connector.get_players(
+                season=active_season, team_id=external_id
+            )
+            games_response = connector.get_games(
+                season=active_season, team_id=external_id
+            )
+
+            players = connector.extract_players(players_response)
+            if config["name"] == "NHL" and len(players) < 15:
+                players = _merge_players(players, _fetch_nhl_roster(resolved_team_name))
+            if config["name"] == "MLB" and len(players) < 15:
+                players = _merge_players(
+                    players, _fetch_mlb_roster(resolved_team_name, active_season)
+                )
+
+            games = connector.extract_games(games_response, resolved_team_name)
+
+            if not games and source_name != "espn":
+                try:
+                    espn_connector = ESPNConnector(
+                        league_name=config["name"],
+                        timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+                    )
+                    fallback_searches = [
+                        resolved_team_name,
+                        *team_search_candidates,
+                    ]
+                    seen_searches = set()
+                    for fallback_name in fallback_searches:
+                        normalized_name = _slugify(fallback_name)
+                        if normalized_name in seen_searches:
+                            continue
+                        seen_searches.add(normalized_name)
+
+                        espn_team_search = espn_connector.get_teams(
+                            season=active_season, search=fallback_name
+                        )
+                        espn_team = espn_connector.extract_team(espn_team_search)
+                        espn_team_id = (espn_team or {}).get("id")
+                        if not espn_team_id:
+                            continue
+
+                        espn_team_name = str(
+                            (espn_team or {}).get("name") or fallback_name
+                        )
+                        espn_games_response = espn_connector.get_games(
+                            season=active_season,
+                            team_id=espn_team_id,
+                        )
+                        espn_games = espn_connector.extract_games(
+                            espn_games_response, espn_team_name
+                        )
+                        if espn_games:
+                            games = espn_games
+                            break
+                except Exception as espn_exc:
+                    attempts.append(("espn-games-fallback", str(espn_exc)))
+
+            if not players and not games:
+                attempts.append((source_name, "no players or games returned"))
+                continue
+
+            response = {
+                "league": config["name"],
+                "id": team_id,
+                "name": team_name,
+                "logo": team_logo,
+                "players": players,
+                "games": games,
+                "source": source_name,
+            }
+            _cache_set_json(cache_key, response, LEAGUE_TEAM_DETAILS_TTL_SECONDS)
+            return response
+        except Exception as exc:
+            attempts.append((source_name, str(exc)))
+
+    attempts_note = "; ".join(f"{source}: {reason}" for source, reason in attempts)
+    logger.warning(
+        f"Unable to fetch live team details for {team_name}. Attempts: {attempts_note}"
+    )
+    response = {
+        "id": team_id,
+        "name": team_name,
+        "league": config["name"],
+        "logo": matched.get("logo", ""),
+        "players": [],
+        "games": [],
+        "source": "static",
+        "warning": "Live team details temporarily unavailable",
+    }
+    _cache_set_json(cache_key, response, LEAGUE_TEAM_DETAILS_TTL_SECONDS)
+    return response
+
+
+@app.get("/api/leagues/{league_id}/teams/{team_id}/games/{game_id}/players")
+def get_league_team_game_players(league_id: str, team_id: str, game_id: str) -> dict:
+    league_key = league_id.lower().strip()
+    cache_key = f"game_players:{SPORTS_DATA_SOURCE}:{league_key}:{team_id}:{game_id}"
+    cached_response = _cache_get_json(cache_key)
+    if isinstance(cached_response, dict):
+        return cached_response
+
     config = LEAGUE_CONFIG.get(league_key)
     if not config:
         raise HTTPException(status_code=404, detail="League not found")
 
     if SPORTS_DATA_SOURCE != "thesportsdb":
-        raise HTTPException(status_code=400, detail="League team details are only supported with TheSportsDB")
+        raise HTTPException(
+            status_code=400,
+            detail="Per-game player stats are only supported with TheSportsDB",
+        )
 
-    league_name = config.get("thesportsdb")
-    if not league_name:
-        raise HTTPException(status_code=400, detail=f"League {config['name']} is not available via TheSportsDB")
+    if not game_id:
+        raise HTTPException(status_code=400, detail="Game id is required")
 
-    connector = TheSportsDBConnector()
+    connector = TheSportsDBConnector(timeout_seconds=UPSTREAM_TIMEOUT_SECONDS)
+    event_stats_data = connector.get_event_stats(game_id)
+    players = connector.extract_event_player_stats(event_stats_data)
 
-    # If the league is hardcoded, map slug back to team name and resolve via search
-    static_teams = _static_league_teams().get(league_key)
-    if static_teams:
-        matched = next((team for team in static_teams if team["id"] == team_id), None)
-        if not matched:
-            raise HTTPException(status_code=404, detail="Team not found")
-        team_name = matched["name"]
-        team_search = connector.get_teams(season=DEFAULT_SEASON, search=team_name)
-        team_info = connector.extract_team(team_search)
-        external_id = (team_info or {}).get("id")
-        if not external_id:
-            raise HTTPException(status_code=404, detail="Team not found in TheSportsDB")
-    else:
-        team_info = connector.extract_team(connector.get_team_by_id(team_id))
-        team_name = (team_info or {}).get("name", "Unknown")
-        external_id = team_id
-
-    players_response = connector.get_players(season=DEFAULT_SEASON, team_id=external_id)
-    games_response = connector.get_games(season=DEFAULT_SEASON, team_id=external_id)
-
-    players = connector.extract_players(players_response)
-    if config["name"] == "NHL" and len(players) < 15:
-        players = _merge_players(players, _fetch_nhl_roster(team_name))
-    if config["name"] == "MLB" and len(players) < 15:
-        players = _merge_players(players, _fetch_mlb_roster(team_name, DEFAULT_SEASON))
-
-    return {
-        "id": team_id,
-        "name": team_name,
+    response = {
         "league": config["name"],
+        "team_id": team_id,
+        "game_id": game_id,
         "players": players,
-        "games": connector.extract_games(games_response, team_name),
+        "available": len(players) > 0,
         "source": SPORTS_DATA_SOURCE,
     }
-
-
-@app.get("/api/teams")
-def get_teams() -> dict:
-    teams = []
-    for team_id, config in TEAM_CONFIG.items():
-        entry = {"id": team_id, "name": config["name"], "league": config["league"]}
-        if SPORTS_DATA_SOURCE != "fallback":
-            try:
-                connector = _connector_for(team_id)
-                season = _get_season(team_id)
-                data = connector.get_teams(season=season, search=config["search"])
-                team_info = connector.extract_team(data)
-                if team_info and team_info.get("id"):
-                    entry["external_id"] = team_info.get("id")
-                    entry["name"] = team_info.get("name", entry["name"])
-            except Exception:
-                entry["source"] = "static"
-        teams.append(entry)
-    return {"teams": teams}
-
-
-TEAM_DETAILS = {
-    "raptors": {
-        "id": "raptors",
-        "name": "Toronto Raptors",
-        "league": "NBA",
-        "players": [
-            {"name": "Scottie Barnes", "position": "F", "points": 19.5, "rebounds": 8.1, "assists": 6.2},
-            {"name": "RJ Barrett", "position": "G", "points": 18.1, "rebounds": 5.4, "assists": 3.1},
-            {"name": "Immanuel Quickley", "position": "G", "points": 17.2, "rebounds": 4.3, "assists": 5.9},
-        ],
-        "games": [
-            {"date": "2026-02-10", "opponent": "Boston Celtics", "home": True, "status": "played", "score": "112-105"},
-            {"date": "2026-02-13", "opponent": "Miami Heat", "home": False, "status": "played", "score": "98-101"},
-            {"date": "2026-02-25", "opponent": "Chicago Bulls", "home": True, "status": "upcoming", "score": None},
-        ],
-    },
-    "maple-leafs": {
-        "id": "maple-leafs",
-        "name": "Toronto Maple Leafs",
-        "league": "NHL",
-        "players": [
-            {"name": "Auston Matthews", "position": "C", "goals": 42, "assists": 28, "points": 70},
-            {"name": "Mitch Marner", "position": "RW", "goals": 18, "assists": 49, "points": 67},
-            {"name": "William Nylander", "position": "RW", "goals": 31, "assists": 34, "points": 65},
-        ],
-        "games": [
-            {"date": "2026-02-12", "opponent": "Montreal Canadiens", "home": True, "status": "played", "score": "4-2"},
-            {"date": "2026-02-15", "opponent": "Ottawa Senators", "home": False, "status": "played", "score": "3-5"},
-            {"date": "2026-02-23", "opponent": "Boston Bruins", "home": True, "status": "upcoming", "score": None},
-        ],
-    },
-    "blue-jays": {
-        "id": "blue-jays",
-        "name": "Toronto Blue Jays",
-        "league": "MLB",
-        "players": [
-            {"name": "Vladimir Guerrero Jr.", "position": "1B", "avg": 0.291, "hr": 32, "rbi": 98},
-            {"name": "Bo Bichette", "position": "SS", "avg": 0.285, "hr": 24, "rbi": 86},
-            {"name": "George Springer", "position": "OF", "avg": 0.271, "hr": 22, "rbi": 73},
-        ],
-        "games": [
-            {"date": "2026-02-08", "opponent": "New York Yankees", "home": False, "status": "played", "score": "6-4"},
-            {"date": "2026-02-11", "opponent": "Tampa Bay Rays", "home": True, "status": "played", "score": "2-5"},
-            {"date": "2026-02-27", "opponent": "Baltimore Orioles", "home": True, "status": "upcoming", "score": None},
-        ],
-    },
-}
-
-
-@app.get("/api/teams/{team_id}")
-def get_team(team_id: str) -> dict:
-    logger.debug(f"GET /api/teams/{team_id}")
-    if team_id not in TEAM_CONFIG:
-        logger.warning(f"Team not found: {team_id}")
-        raise HTTPException(status_code=404, detail="Team not found")
-
-    cached = TEAM_CACHE.get(team_id)
-    if cached and time.time() - cached["timestamp"] < CACHE_TTL_SECONDS:
-        logger.debug(f"Returning cached data for {team_id}")
-        return cached["data"]
-
-    if SPORTS_DATA_SOURCE == "fallback":
-        logger.debug(f"Using fallback data for {team_id}")
-        result = _fallback_team(team_id)
-        TEAM_CACHE[team_id] = {"timestamp": time.time(), "data": result}
-        return result
-
-    try:
-        config = TEAM_CONFIG[team_id]
-        connector = _connector_for(team_id)
-        season = _get_season(team_id)
-        logger.debug(f"Fetching {team_id} from {SPORTS_DATA_SOURCE} with season {season}")
-
-        teams_response = connector.get_teams(season=season, search=config["search"])
-        logger.debug(f"Teams response for {team_id}: {teams_response}")
-        team_info = connector.extract_team(teams_response)
-        logger.debug(f"Extracted team info: {team_info}")
-        team_name = (team_info or {}).get("name", config["name"])
-        external_id = (team_info or {}).get("id")
-        logger.debug(f"Team info: name={team_name}, id={external_id}")
-
-        players_response = connector.get_players(
-            season=season,
-            team_id=external_id,
-            search=config["search"] if external_id is None else None,
-        )
-        logger.debug(f"Players response: {players_response}")
-        games_response = connector.get_games(
-            season=season,
-            team_id=external_id,
-            search=config["search"] if external_id is None else None,
-        )
-        logger.debug(f"Games response: {games_response}")
-
-        team_data = {
-            "id": team_id,
-            "name": team_name,
-            "league": config["league"],
-            "players": connector.extract_players(players_response),
-            "games": connector.extract_games(games_response, team_name),
-            "source": SPORTS_DATA_SOURCE,
-        }
-        logger.debug(f"Successfully fetched {team_id} from {SPORTS_DATA_SOURCE}")
-    except Exception as exc:
-        logger.error(f"Error fetching {team_id} from {SPORTS_DATA_SOURCE}: {exc}")
-        team_data = _fallback_team(team_id)
-        team_data["warning"] = str(exc)
-
-    TEAM_CACHE[team_id] = {"timestamp": time.time(), "data": team_data}
-    return team_data
+    _cache_set_json(cache_key, response, GAME_PLAYERS_TTL_SECONDS)
+    return response
