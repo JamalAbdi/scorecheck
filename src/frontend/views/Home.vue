@@ -81,7 +81,6 @@
 									<div class="today-status">
 										<span class="today-label">{{ gameStateLabel(game) }}</span>
 										<span class="today-date">{{ formatGameDate(game) }}</span>
-										<span class="today-date">{{ formatGameDate(game) }}</span>
 										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 									</div>
 								</div>

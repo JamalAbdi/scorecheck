@@ -1,26 +1,34 @@
-.PHONY: help build up down logs clean restart backend-build frontend-build k8-sleep k8-wake k8-schedule-on k8-schedule-off
+.PHONY: help build up down logs clean restart backend-build frontend-build prod-up prod-down prod-logs deploy teardown-old infra-plan infra-apply infra-destroy
 
 help:
-	@echo "Scorecheck Docker Commands"
+	@echo "Scorecheck Commands"
 	@echo ""
-	@echo "Available targets:"
+	@echo "Local development:"
 	@echo "  make build              - Build both images"
-	@echo "  make up                 - Start all services"
+	@echo "  make up                 - Start all services (local dev)"
 	@echo "  make down               - Stop all services"
 	@echo "  make restart            - Restart all services"
 	@echo "  make logs               - View logs (all services)"
 	@echo "  make logs-backend       - View backend logs"
 	@echo "  make logs-frontend      - View frontend logs"
 	@echo "  make clean              - Remove containers and images"
-	@echo "  make backend-build      - Build backend image only"
-	@echo "  make frontend-build     - Build frontend image only"
 	@echo "  make status             - Show service status"
 	@echo "  make shell-backend      - Open shell in backend container"
 	@echo "  make shell-frontend     - Open shell in frontend container"
-	@echo "  make k8-sleep           - Scale EKS node group to 0 (cost-saving sleep mode)"
-	@echo "  make k8-wake            - Scale EKS node group to 1 (restore service)"
-	@echo "  make k8-schedule-on     - Auto sleep at 00:00 and wake at 08:00 daily"
-	@echo "  make k8-schedule-off    - Remove auto sleep/wake schedule"
+	@echo ""
+	@echo "Production (EC2 + Docker Compose + Caddy):"
+	@echo "  make prod-up            - Start production stack locally (test)"
+	@echo "  make prod-down          - Stop production stack"
+	@echo "  make prod-logs          - View production logs"
+	@echo "  make deploy             - Deploy to EC2 via SSH"
+	@echo ""
+	@echo "Infrastructure (Terraform):"
+	@echo "  make infra-plan         - Plan Terraform changes"
+	@echo "  make infra-apply        - Apply Terraform (create EC2 + Route 53)"
+	@echo "  make infra-destroy      - Destroy new infrastructure"
+	@echo "  make teardown-old       - Tear down old EKS/RDS/ECR infrastructure"
+
+# --- Local development ---
 
 build:
 	cd docker && docker compose build
@@ -44,7 +52,7 @@ logs-frontend:
 	cd docker && docker compose logs -f frontend
 
 clean:
-	cd docker && docker-compose down -v
+	cd docker && docker compose down -v
 	docker rmi scorecheck-backend:latest scorecheck-frontend:latest 2>/dev/null || true
 
 backend-build:
@@ -62,14 +70,30 @@ shell-backend:
 shell-frontend:
 	docker exec -it scorecheck-frontend /bin/sh
 
-k8-sleep:
-	./k8-deployments/sleep.sh
+# --- Production ---
 
-k8-wake:
-	./k8-deployments/wake.sh
+prod-up:
+	cd docker && DOMAIN=$${DOMAIN:-localhost} docker compose -f docker-compose.prod.yml up -d --build
 
-k8-schedule-on:
-	./k8-deployments/install-schedule.sh
+prod-down:
+	cd docker && docker compose -f docker-compose.prod.yml down
 
-k8-schedule-off:
-	./k8-deployments/remove-schedule.sh
+prod-logs:
+	cd docker && docker compose -f docker-compose.prod.yml logs -f
+
+deploy:
+	./scripts/deploy.sh
+
+# --- Infrastructure ---
+
+infra-plan:
+	cd terraform && terraform plan
+
+infra-apply:
+	cd terraform && terraform apply
+
+infra-destroy:
+	cd terraform && terraform destroy
+
+teardown-old:
+	./scripts/teardown-old-infra.sh

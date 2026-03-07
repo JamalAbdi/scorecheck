@@ -1,5 +1,5 @@
 # Multi-stage build for frontend
-FROM node:14-alpine AS builder
+FROM node:18-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -12,7 +12,7 @@ ENV VUE_APP_API_URL=$VUE_APP_API_URL
 COPY src/frontend/package*.json ./
 
 # Install dependencies
-RUN npm install --legacy-peer-deps
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY src/frontend/ .
