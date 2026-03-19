@@ -37,7 +37,7 @@
 									</div>
 								</div>
 								<div class="today-status">
-										<span class="today-label">Yesterday</span>
+											<span class="today-label">Today</span>
 									<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 								</div>
 							</div>
@@ -79,7 +79,7 @@
 										</div>
 									</div>
 									<div class="today-status">
-										<span class="today-label">Today</span>
+										<span class="today-label">Yesterday</span>
 
 										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 									</div>
@@ -352,7 +352,7 @@ onUnmounted(() => {
 .home {
 	background: #fff;
 	border-radius: 16px;
-	padding: 24px;
+	padding: 18px 16px;
 	box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
 }
 
@@ -391,8 +391,8 @@ onUnmounted(() => {
 
 .yesterday-section {
 	margin-top: 28px;
-	padding: 16px;
-	border: 1px solid #e5e7eb;
+	padding: 12px;
+	border: 0;
 	border-radius: 14px;
 	background: #f9fafb;
 }
@@ -426,8 +426,8 @@ onUnmounted(() => {
 	grid-template-columns: minmax(0, 1fr) 84px;
 	align-items: center;
 	gap: 5px;
-	padding: 10px 12px;
-	border: 1px solid #e5e7eb;
+	padding: 10px 10px;
+	border: 0.75px solid #dbe3f0;
 	border-radius: 10px;
 }
 
