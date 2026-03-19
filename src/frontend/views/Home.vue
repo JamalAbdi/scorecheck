@@ -79,7 +79,7 @@
 										</div>
 									</div>
 									<div class="today-status">
-										<span class="today-label">{{ gameStateLabel(game) }}</span>
+										<span class="today-label">Today</span>
 
 										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 									</div>
@@ -423,7 +423,7 @@ onUnmounted(() => {
 
 .today-game {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 96px;
+	grid-template-columns: minmax(0, 1fr) 84px;
 	align-items: center;
 	gap: 5px;
 	padding: 10px 12px;
@@ -443,7 +443,7 @@ onUnmounted(() => {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) 36px;
 	align-items: flex-start;
-	gap: 18px;
+	gap: 10px;
 	width: 100%;
 }
 
@@ -465,10 +465,11 @@ onUnmounted(() => {
 }
 
 .team-text strong {
-	font-size: 13px;
+	font-size: 12px;
 	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	overflow: visible;
+	text-overflow: clip;
+	line-height: 1.2;
 }
 
 .team-record {
@@ -509,7 +510,7 @@ onUnmounted(() => {
 	align-self: center;
 	justify-self: end;
 	gap: 2px;
-	width: 96px;
+	width: 84px;
 }
 
 .today-label {
@@ -532,12 +533,12 @@ onUnmounted(() => {
 	}
 
 	.today-game {
-		grid-template-columns: minmax(0, 1fr) 96px;
+		grid-template-columns: minmax(0, 1fr) 84px;
 		align-items: center;
 	}
 
 	.today-status {
-		width: 96px;
+		width: 84px;
 		justify-content: center;
 		align-items: flex-end;
 		align-self: center;
