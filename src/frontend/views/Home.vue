@@ -350,10 +350,11 @@ onUnmounted(() => {
 
 <style scoped>
 .home {
-	background: transparent;
-	border-radius: 0;
-	padding: 8px 0;
-	box-shadow: none;
+	background: #fff;
+	border: 1px solid #dbe3f0;
+	border-radius: 16px;
+	padding: 14px 12px;
+	box-shadow: 0 8px 16px rgba(15, 23, 42, 0.06);
 }
 
 .home p {
@@ -417,13 +418,13 @@ onUnmounted(() => {
 
 .today-list {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 	gap: 10px;
 }
 
 .today-game {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 84px;
+	grid-template-columns: minmax(0, 1fr) 76px;
 	align-items: center;
 	gap: 5px;
 	padding: 10px 10px;
@@ -536,7 +537,7 @@ onUnmounted(() => {
 	align-self: center;
 	justify-self: end;
 	gap: 2px;
-	width: 84px;
+	width: 76px;
 }
 
 .today-label {
@@ -559,12 +560,12 @@ onUnmounted(() => {
 	}
 
 	.today-game {
-		grid-template-columns: minmax(0, 1fr) 84px;
+		grid-template-columns: minmax(0, 1fr) 76px;
 		align-items: center;
 	}
 
 	.today-status {
-		width: 84px;
+		width: 76px;
 		justify-content: center;
 		align-items: flex-end;
 		align-self: center;

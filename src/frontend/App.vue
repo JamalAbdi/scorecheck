@@ -289,7 +289,7 @@ body {
 
 .content {
   flex: 1;
-  padding: 20px 18px 40px;
+  padding: 20px 12px 40px;
 }
 </style>
 
