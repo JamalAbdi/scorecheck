@@ -52,18 +52,39 @@ resource "aws_route_table_association" "scorecheck_subnet" {
   route_table_id = aws_route_table.scorecheck_public.id
 }
 
+# --- IAM role for SSM access (replaces SSH) ---
+
+resource "aws_iam_role" "scorecheck_ssm" {
+  name = "${var.project_name}-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = {
+    Name = "${var.project_name}-ssm-role"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "scorecheck_ssm" {
+  role       = aws_iam_role.scorecheck_ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "scorecheck_ssm" {
+  name = "${var.project_name}-ssm-profile"
+  role = aws_iam_role.scorecheck_ssm.name
+}
+
 resource "aws_security_group" "scorecheck" {
   name        = "${var.project_name}-sg"
-  description = "Allow HTTP, HTTPS, and SSH"
+  description = "Allow HTTP and HTTPS"
   vpc_id      = data.aws_vpc.default.id
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = var.ssh_allowed_cidrs
-  }
 
   ingress {
     description = "HTTP"
@@ -100,7 +121,7 @@ resource "aws_instance" "scorecheck" {
 
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  key_name               = var.key_name
+  iam_instance_profile   = aws_iam_instance_profile.scorecheck_ssm.name
   vpc_security_group_ids = [aws_security_group.scorecheck.id]
   subnet_id              = data.aws_subnets.default.ids[0]
 
@@ -129,7 +150,7 @@ resource "aws_spot_instance_request" "scorecheck" {
 
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  key_name               = var.key_name
+  iam_instance_profile   = aws_iam_instance_profile.scorecheck_ssm.name
   vpc_security_group_ids = [aws_security_group.scorecheck.id]
   subnet_id              = data.aws_subnets.default.ids[0]
   wait_for_fulfillment   = true

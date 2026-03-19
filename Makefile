@@ -20,7 +20,7 @@ help:
 	@echo "  make prod-up            - Start production stack locally (test)"
 	@echo "  make prod-down          - Stop production stack"
 	@echo "  make prod-logs          - View production logs"
-	@echo "  make deploy             - Deploy to EC2 via SSH"
+	@echo "  make deploy             - Deploy to EC2 via AWS SSM (no SSH)"
 	@echo ""
 	@echo "Infrastructure (Terraform):"
 	@echo "  make infra-plan         - Plan Terraform changes"

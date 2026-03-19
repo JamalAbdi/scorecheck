@@ -8,9 +8,9 @@ output "instance_id" {
   value       = var.use_spot ? aws_spot_instance_request.scorecheck[0].spot_instance_id : aws_instance.scorecheck[0].id
 }
 
-output "ssh_command" {
-  description = "SSH command to connect to the server"
-  value       = "ssh -i ~/.ssh/${var.key_name}.pem ec2-user@${aws_eip.scorecheck.public_ip}"
+output "ssm_connect" {
+  description = "AWS CLI command to open an SSM session on the server"
+  value       = "aws ssm start-session --target ${var.use_spot ? aws_spot_instance_request.scorecheck[0].spot_instance_id : aws_instance.scorecheck[0].id}"
 }
 
 output "hosted_zone_id" {

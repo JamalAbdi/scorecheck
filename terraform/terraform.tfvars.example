@@ -1,9 +1,7 @@
-region         = "us-east-1"
-project_name   = "scorecheck"
-domain_name    = "scorecheck.ca"
-instance_type  = "t3a.small"
-key_name       = "your-key-pair-name"
-repository_url = "https://github.com/JamalAbdi/scorecheck.git"
+region            = "us-east-1"
+project_name      = "scorecheck"
+domain_name       = "scorecheck.ca"
+instance_type     = "t3a.small"
+repository_url    = "https://github.com/JamalAbdi/scorecheck.git"
 repository_branch = "reduce-costs"
-use_spot       = true
-ssh_allowed_cidrs = ["0.0.0.0/0"]  # Restrict to your IP for security
+use_spot          = true
