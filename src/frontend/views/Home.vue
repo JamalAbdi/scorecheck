@@ -462,14 +462,26 @@ onUnmounted(() => {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
 }
 
 .team-text strong {
-	font-size: 12px;
+	font-size: 13px;
+	display: block;
 	white-space: nowrap;
-	overflow: visible;
+	overflow: hidden;
 	text-overflow: clip;
 	line-height: 1.2;
+}
+
+.team-text::-webkit-scrollbar {
+	height: 3px;
+}
+
+.team-text::-webkit-scrollbar-thumb {
+	background: #cbd5e1;
+	border-radius: 999px;
 }
 
 .team-record {
@@ -487,6 +499,20 @@ onUnmounted(() => {
 	font-variant-numeric: tabular-nums;
 	line-height: 1;
 	padding-top: 1px;
+}
+
+/* Keep Yesterday game typography identical to Today cards */
+.yesterday-section .team-text strong {
+	font-size: 13px;
+	line-height: 1.2;
+}
+
+.yesterday-section .team-record {
+	font-size: 11px;
+}
+
+.yesterday-section .team-score {
+	font-size: 18px;
 }
 
 .today-team-link:hover {
