@@ -80,8 +80,7 @@
 									</div>
 									<div class="today-status">
 										<span class="today-label">{{ gameStateLabel(game) }}</span>
-										<span class="today-date">{{ formatGameDate(game) }}</span>
-										<span class="today-date">{{ formatGameDate(game) }}</span>
+
 										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 									</div>
 								</div>
@@ -425,7 +424,7 @@ onUnmounted(() => {
 .today-game {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) 96px;
-	align-items: start;
+	align-items: center;
 	gap: 5px;
 	padding: 10px 12px;
 	border: 1px solid #e5e7eb;
@@ -535,6 +534,8 @@ onUnmounted(() => {
 
 	.today-status {
 		width: auto;
+		align-items: center;
+		text-align: center;
 	}
 }
 </style>
