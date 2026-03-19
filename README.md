@@ -9,7 +9,7 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-For live data, set `SPORTS_DATA_SOURCE` to `espn`.
+For live data, set `SPORTS_DATA_SOURCE` to `thesportsdb` (default) or `espn`.
 
 API endpoints:
 - http://localhost:8000/api/health

@@ -1,128 +1,70 @@
 #!/bin/bash
 # =============================================================================
-# Deploy scorecheck to EC2 instance via AWS SSM (no SSH required)
+# Deploy scorecheck to EC2 instance
 #
 # Prerequisites:
 #   - Terraform has been applied (terraform/ directory)
-#   - AWS CLI installed and configured with sufficient permissions
-#   - Session Manager plugin installed:
-#     https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+#   - SSH key pair exists locally
 #
-# Usage: ./scripts/deploy.sh [--branch <branch>]
+# Usage: ./scripts/deploy.sh [--key ~/.ssh/mykey.pem]
 # =============================================================================
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BRANCH_OVERRIDE=""
+KEY_PATH=""
 
 # Parse args
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --branch) BRANCH_OVERRIDE="$2"; shift 2 ;;
+    --key) KEY_PATH="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
 
-# Get instance ID and branch from Terraform outputs
+# Get outputs from Terraform
 cd "$PROJECT_DIR/terraform"
-
-INSTANCE_ID=$(terraform output -raw instance_id 2>/dev/null)
-if [[ -z "$INSTANCE_ID" ]]; then
-  echo "Error: Could not get instance_id from Terraform. Run 'terraform apply' first."
+PUBLIC_IP=$(terraform output -raw public_ip 2>/dev/null)
+if [[ -z "$PUBLIC_IP" ]]; then
+  echo "Error: Could not get public_ip from Terraform. Run 'terraform apply' first."
   exit 1
 fi
 
-# Determine branch: CLI arg > terraform variable > default
-if [[ -n "$BRANCH_OVERRIDE" ]]; then
-  DEPLOY_BRANCH="$BRANCH_OVERRIDE"
-else
-  DEPLOY_BRANCH="$(terraform output -raw repository_branch 2>/dev/null || true)"
-  if [[ -z "$DEPLOY_BRANCH" ]]; then
-    # Fall back to reading from variables
-    DEPLOY_BRANCH="$(grep 'repository_branch' terraform.tfvars 2>/dev/null | awk -F'"' '{print $2}' || echo "main")"
-  fi
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+if [[ -n "$KEY_PATH" ]]; then
+  SSH_OPTS="$SSH_OPTS -i $KEY_PATH"
 fi
 
-AWS_REGION="$(terraform output -raw region 2>/dev/null || aws configure get region || echo "us-east-1")"
+echo "Deploying scorecheck to $PUBLIC_IP..."
 
-echo "Deploying scorecheck..."
-echo "  Instance : $INSTANCE_ID"
-echo "  Branch   : $DEPLOY_BRANCH"
-echo "  Region   : $AWS_REGION"
-echo ""
+# Sync project files to EC2
+echo "Syncing project files..."
+rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.venv' --exclude='__pycache__' \
+  -e "ssh $SSH_OPTS" \
+  "$PROJECT_DIR/" "ec2-user@${PUBLIC_IP}:~/scorecheck/"
 
-# Wait until SSM agent is online (useful right after terraform apply)
-echo "Checking SSM connectivity..."
-aws ssm wait command-executed \
-  --command-id "$(aws ssm send-command \
-    --instance-ids "$INSTANCE_ID" \
-    --document-name "AWS-RunShellScript" \
-    --parameters '{"commands":["echo ok"]}' \
-    --region "$AWS_REGION" \
-    --query "Command.CommandId" \
-    --output text)" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$AWS_REGION" 2>/dev/null || true
+# Build and start on remote
+echo "Building and starting services on remote..."
+ssh $SSH_OPTS "ec2-user@${PUBLIC_IP}" << 'REMOTE_SCRIPT'
+cd ~/scorecheck/docker
 
-echo "Sending deploy command via SSM..."
-COMMAND_ID=$(aws ssm send-command \
-  --instance-ids "$INSTANCE_ID" \
-  --document-name "AWS-RunShellScript" \
-  --comment "scorecheck deploy" \
-  --parameters "commands=[
-    'set -euo pipefail',
-    'cd /home/ec2-user/scorecheck',
-    'git fetch origin ${DEPLOY_BRANCH}',
-    'git checkout ${DEPLOY_BRANCH}',
-    'git pull --ff-only origin ${DEPLOY_BRANCH}',
-    'cd docker',
-    'DOMAIN=\"\$(grep -oP \"(?<=^)[a-z0-9.-]+\\\\.[a-z]{2,}\" Caddyfile | head -1 || true)\"',
-    'docker compose -f docker-compose.prod.yml down 2>/dev/null || true',
-    'DOMAIN=\"\$DOMAIN\" docker compose -f docker-compose.prod.yml up -d --build',
-    'sleep 10',
-    'docker compose -f docker-compose.prod.yml ps'
-  ]" \
-  --region "$AWS_REGION" \
-  --query "Command.CommandId" \
-  --output text)
-
-echo "Command ID: $COMMAND_ID"
-echo "Waiting for deployment to finish..."
-
-aws ssm wait command-executed \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$AWS_REGION"
-
-# Print output
-STATUS=$(aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$AWS_REGION" \
-  --query "Status" \
-  --output text)
-
-echo ""
-aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$AWS_REGION" \
-  --query "StandardOutputContent" \
-  --output text
-
-if [[ "$STATUS" != "Success" ]]; then
-  echo "--- STDERR ---"
-  aws ssm get-command-invocation \
-    --command-id "$COMMAND_ID" \
-    --instance-id "$INSTANCE_ID" \
-    --region "$AWS_REGION" \
-    --query "StandardErrorContent" \
-    --output text
-  echo "Deployment failed with status: $STATUS"
-  exit 1
+# Get domain from Caddyfile or use default
+DOMAIN="${DOMAIN:-}"
+if [[ -z "$DOMAIN" ]]; then
+  echo "Note: DOMAIN not set. Caddy will use localhost (HTTP only)."
+  echo "Set DOMAIN env var for HTTPS: DOMAIN=scorecheck.ca ./scripts/deploy.sh"
 fi
+
+# Pull latest images and rebuild
+docker compose -f docker-compose.prod.yml down 2>/dev/null || true
+DOMAIN="$DOMAIN" docker compose -f docker-compose.prod.yml up -d --build
+
+echo ""
+echo "Services started. Checking health..."
+sleep 10
+docker compose -f docker-compose.prod.yml ps
+REMOTE_SCRIPT
 
 echo ""
 echo "Deployment complete!"
-echo "  Connect: aws ssm start-session --instance-id $INSTANCE_ID --region $AWS_REGION"
+echo "  SSH:  ssh $SSH_OPTS ec2-user@${PUBLIC_IP}"
 echo "  App:  https://${PUBLIC_IP} (or your domain once DNS propagates)"

@@ -37,7 +37,7 @@
 									</div>
 								</div>
 								<div class="today-status">
-									<span class="today-label">{{ gameStateLabel(game) }}</span>
+											<span class="today-label">Today</span>
 									<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 								</div>
 							</div>
@@ -79,7 +79,8 @@
 										</div>
 									</div>
 									<div class="today-status">
-										<span class="today-label">{{ gameStateLabel(game) }}</span>
+										<span class="today-label">Yesterday</span>
+
 										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 									</div>
 								</div>
@@ -351,7 +352,7 @@ onUnmounted(() => {
 .home {
 	background: #fff;
 	border-radius: 16px;
-	padding: 24px;
+	padding: 18px 16px;
 	box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
 }
 
@@ -390,8 +391,8 @@ onUnmounted(() => {
 
 .yesterday-section {
 	margin-top: 28px;
-	padding: 16px;
-	border: 1px solid #e5e7eb;
+	padding: 12px;
+	border: 0;
 	border-radius: 14px;
 	background: #f9fafb;
 }
@@ -422,11 +423,11 @@ onUnmounted(() => {
 
 .today-game {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 96px;
+	grid-template-columns: minmax(0, 1fr) 84px;
 	align-items: center;
 	gap: 5px;
-	padding: 10px 12px;
-	border: 1px solid #e5e7eb;
+	padding: 10px 10px;
+	border: 0.75px solid #dbe3f0;
 	border-radius: 10px;
 }
 
@@ -442,7 +443,7 @@ onUnmounted(() => {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) 36px;
 	align-items: flex-start;
-	gap: 18px;
+	gap: 10px;
 	width: 100%;
 }
 
@@ -461,13 +462,26 @@ onUnmounted(() => {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
 }
 
 .team-text strong {
 	font-size: 13px;
+	display: block;
 	white-space: nowrap;
 	overflow: hidden;
-	text-overflow: ellipsis;
+	text-overflow: clip;
+	line-height: 1.2;
+}
+
+.team-text::-webkit-scrollbar {
+	height: 3px;
+}
+
+.team-text::-webkit-scrollbar-thumb {
+	background: #cbd5e1;
+	border-radius: 999px;
 }
 
 .team-record {
@@ -487,6 +501,20 @@ onUnmounted(() => {
 	padding-top: 1px;
 }
 
+/* Keep Yesterday game typography identical to Today cards */
+.yesterday-section .team-text strong {
+	font-size: 13px;
+	line-height: 1.2;
+}
+
+.yesterday-section .team-record {
+	font-size: 11px;
+}
+
+.yesterday-section .team-score {
+	font-size: 18px;
+}
+
 .today-team-link:hover {
 	text-decoration: underline;
 }
@@ -503,9 +531,12 @@ onUnmounted(() => {
 	color: #4b5563;
 	display: flex;
 	flex-direction: column;
+	justify-content: center;
 	align-items: flex-end;
+	align-self: center;
+	justify-self: end;
 	gap: 2px;
-	width: 96px;
+	width: 84px;
 }
 
 .today-label {
@@ -528,13 +559,17 @@ onUnmounted(() => {
 	}
 
 	.today-game {
-		grid-template-columns: minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1fr) 84px;
+		align-items: center;
 	}
 
 	.today-status {
-		width: auto;
-		align-items: center;
-		text-align: center;
+		width: 84px;
+		justify-content: center;
+		align-items: flex-end;
+		align-self: center;
+		justify-self: end;
+		text-align: right;
 	}
 }
 </style>

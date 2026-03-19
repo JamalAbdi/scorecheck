@@ -43,8 +43,6 @@ services:
   caddy:
     image: caddy:2-alpine
     container_name: scorecheck-caddy
-    environment:
-      - DOMAIN=${DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"

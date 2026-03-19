@@ -26,65 +26,18 @@ data "aws_subnets" "default" {
   }
 }
 
-resource "aws_internet_gateway" "scorecheck" {
-  vpc_id = data.aws_vpc.default.id
-
-  tags = {
-    Name = "${var.project_name}-igw"
-  }
-}
-
-resource "aws_route_table" "scorecheck_public" {
-  vpc_id = data.aws_vpc.default.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.scorecheck.id
-  }
-
-  tags = {
-    Name = "${var.project_name}-public-rt"
-  }
-}
-
-resource "aws_route_table_association" "scorecheck_subnet" {
-  subnet_id      = data.aws_subnets.default.ids[0]
-  route_table_id = aws_route_table.scorecheck_public.id
-}
-
-# --- IAM role for SSM access (replaces SSH) ---
-
-resource "aws_iam_role" "scorecheck_ssm" {
-  name = "${var.project_name}-ssm-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
-  })
-
-  tags = {
-    Name = "${var.project_name}-ssm-role"
-  }
-}
-
-resource "aws_iam_role_policy_attachment" "scorecheck_ssm" {
-  role       = aws_iam_role.scorecheck_ssm.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_instance_profile" "scorecheck_ssm" {
-  name = "${var.project_name}-ssm-profile"
-  role = aws_iam_role.scorecheck_ssm.name
-}
-
 resource "aws_security_group" "scorecheck" {
   name        = "${var.project_name}-sg"
-  description = "Allow HTTP and HTTPS"
+  description = "Allow HTTP, HTTPS, and SSH"
   vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.ssh_allowed_cidrs
+  }
 
   ingress {
     description = "HTTP"
@@ -121,17 +74,13 @@ resource "aws_instance" "scorecheck" {
 
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  iam_instance_profile   = aws_iam_instance_profile.scorecheck_ssm.name
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.scorecheck.id]
   subnet_id              = data.aws_subnets.default.ids[0]
 
   user_data = templatefile("${path.module}/user-data.sh", {
-    domain_name       = var.domain_name
-    repository_url    = var.repository_url
-    repository_branch = var.repository_branch
+    domain_name = var.domain_name
   })
-
-  user_data_replace_on_change = true
 
   root_block_device {
     volume_size = 20
@@ -150,19 +99,15 @@ resource "aws_spot_instance_request" "scorecheck" {
 
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  iam_instance_profile   = aws_iam_instance_profile.scorecheck_ssm.name
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.scorecheck.id]
   subnet_id              = data.aws_subnets.default.ids[0]
   wait_for_fulfillment   = true
   spot_type              = "persistent"
 
   user_data = templatefile("${path.module}/user-data.sh", {
-    domain_name       = var.domain_name
-    repository_url    = var.repository_url
-    repository_branch = var.repository_branch
+    domain_name = var.domain_name
   })
-
-  user_data_replace_on_change = true
 
   root_block_device {
     volume_size = 20
@@ -187,8 +132,6 @@ resource "aws_eip" "scorecheck" {
 resource "aws_eip_association" "scorecheck" {
   instance_id   = var.use_spot ? aws_spot_instance_request.scorecheck[0].spot_instance_id : aws_instance.scorecheck[0].id
   allocation_id = aws_eip.scorecheck.id
-
-  depends_on = [aws_route_table_association.scorecheck_subnet]
 }
 
 # --- Route 53 ---
