@@ -350,10 +350,10 @@ onUnmounted(() => {
 
 <style scoped>
 .home {
-	background: #fff;
-	border-radius: 16px;
-	padding: 18px 16px;
-	box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+	background: transparent;
+	border-radius: 0;
+	padding: 8px 0;
+	box-shadow: none;
 }
 
 .home p {
@@ -462,24 +462,24 @@ onUnmounted(() => {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
-	overflow-x: auto;
-	overflow-y: hidden;
+	overflow: hidden;
 }
 
 .team-text strong {
 	font-size: 13px;
 	display: block;
 	white-space: nowrap;
-	overflow: hidden;
+	overflow-x: auto;
+	overflow-y: hidden;
 	text-overflow: clip;
 	line-height: 1.2;
 }
 
-.team-text::-webkit-scrollbar {
+.team-text strong::-webkit-scrollbar {
 	height: 3px;
 }
 
-.team-text::-webkit-scrollbar-thumb {
+.team-text strong::-webkit-scrollbar-thumb {
 	background: #cbd5e1;
 	border-radius: 999px;
 }
