@@ -5,47 +5,49 @@
 			<p v-if="loadingTodayGames">Loading games...</p>
 			<p v-else-if="todayGamesError" class="today-games-error">{{ todayGamesError }}</p>
 			<div v-else>
-				<p v-if="hasNoTodayGames && hasAnyYesterdayGames" class="today-empty">
-					No games today. Showing yesterday below.
-				</p>
-				<div class="today-leagues">
-					<div v-for="league in sortedTodayLeagues" :key="`today-${league.id}`" class="today-league">
-						<h4>{{ league.name }}</h4>
-						<div v-if="league.games.length === 0" class="today-empty">No games today.</div>
-						<div v-else class="today-list">
-							<div v-for="game in league.games" :key="game.id || `${league.id}-${game.home_team}-${game.away_team}`" class="today-game">
-								<div class="today-teams">
-									<div class="team-row">
-										<router-link :to="teamRoute(league.id, game.away_team)" class="today-team-link">
-											<img v-if="game.away_logo" :src="game.away_logo" :alt="`${game.away_team} logo`" class="team-logo" />
-											<div class="team-text">
-												<strong>{{ displayTeamName(game.away_team) }}</strong>
-												<span class="team-record">({{ game.away_record || '-' }})</span>
-											</div>
-										</router-link>
-										<span class="team-score">{{ displayTeamScore(game, 'away') }}</span>
+				<div class="games-section today-section">
+					<p v-if="hasNoTodayGames && hasAnyYesterdayGames" class="today-empty">
+						No games today. Showing yesterday below.
+					</p>
+					<div class="today-leagues">
+						<div v-for="league in sortedTodayLeagues" :key="`today-${league.id}`" class="today-league">
+							<h4>{{ league.name }}</h4>
+							<div v-if="league.games.length === 0" class="today-empty">No games today.</div>
+							<div v-else class="today-list">
+								<div v-for="game in league.games" :key="game.id || `${league.id}-${game.home_team}-${game.away_team}`" class="today-game">
+									<div class="today-teams">
+										<div class="team-row">
+											<router-link :to="teamRoute(league.id, game.away_team)" class="today-team-link">
+												<img v-if="game.away_logo" :src="game.away_logo" :alt="`${game.away_team} logo`" class="team-logo" />
+												<div class="team-text">
+													<strong>{{ displayTeamName(game.away_team) }}</strong>
+													<span class="team-record">({{ game.away_record || '-' }})</span>
+												</div>
+											</router-link>
+											<span class="team-score">{{ displayTeamScore(game, 'away') }}</span>
+										</div>
+										<div class="team-row">
+											<router-link :to="teamRoute(league.id, game.home_team)" class="today-team-link">
+												<img v-if="game.home_logo" :src="game.home_logo" :alt="`${game.home_team} logo`" class="team-logo" />
+												<div class="team-text">
+													<strong>{{ displayTeamName(game.home_team) }}</strong>
+													<span class="team-record">({{ game.home_record || '-' }})</span>
+												</div>
+											</router-link>
+											<span class="team-score">{{ displayTeamScore(game, 'home') }}</span>
+										</div>
 									</div>
-									<div class="team-row">
-										<router-link :to="teamRoute(league.id, game.home_team)" class="today-team-link">
-											<img v-if="game.home_logo" :src="game.home_logo" :alt="`${game.home_team} logo`" class="team-logo" />
-											<div class="team-text">
-												<strong>{{ displayTeamName(game.home_team) }}</strong>
-												<span class="team-record">({{ game.home_record || '-' }})</span>
-											</div>
-										</router-link>
-										<span class="team-score">{{ displayTeamScore(game, 'home') }}</span>
+									<div class="today-status">
+										<span class="today-label">Today</span>
+										<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 									</div>
-								</div>
-								<div class="today-status">
-											<span class="today-label">Today</span>
-									<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 								</div>
 							</div>
 						</div>
 					</div>
 				</div>
 
-				<div class="yesterday-section">
+				<div class="games-section yesterday-section">
 					<div class="section-heading-row">
 						<h3 class="yesterday-heading">Yesterday's Games</h3>
 						<span class="date-bubble">Yesterday</span>
@@ -390,12 +392,16 @@ onUnmounted(() => {
 	font-weight: 600;
 }
 
-.yesterday-section {
-	margin-top: 28px;
+
+.games-section {
 	padding: 12px;
 	border: 0;
 	border-radius: 14px;
 	background: #f9fafb;
+}
+
+.yesterday-section {
+	margin-top: 28px;
 }
 
 .today-games-error {
@@ -418,7 +424,7 @@ onUnmounted(() => {
 
 .today-list {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 10px;
 }
 
