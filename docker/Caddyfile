@@ -1,3 +1,3 @@
-{$DOMAIN:localhost} {
+scorecheck.ca, www.scorecheck.ca {
     reverse_proxy scorecheck-frontend:8080
 }
