@@ -277,6 +277,8 @@ const isLiveStatus = (status) => {
 const formatLiveStatus = (status) => String(status || '')
 	.replace(/\b(\d+)(?:st|nd|rd|th)\s+quarter\b/gi, 'Q$1')
 	.replace(/\bquarter\b/gi, 'Q')
+	.replace(/\b(\d+)(?:st|nd|rd|th)\s+period\b/gi, 'P$1')
+	.replace(/\bperiod\b/gi, 'P')
 	.replace(/\s+/g, ' ')
 	.trim()
 
