@@ -85,7 +85,11 @@ fi
 echo ""
 echo "=== Step 2: Destroying RDS database ==="
 
-INFRA_DIR="$PROJECT_DIR/_archived/old-k8s-eks-infra/infra"
+INFRA_DIR="$PROJECT_DIR/infra"
+
+if [[ ! -d "$INFRA_DIR" ]]; then
+  echo "infra directory not found at $INFRA_DIR, skipping Terraform-based teardown steps."
+fi
 if [[ -d "$INFRA_DIR/db" ]]; then
   echo "Disabling deletion protection first..."
   DB_ID=$(aws rds describe-db-instances --region "$REGION" \

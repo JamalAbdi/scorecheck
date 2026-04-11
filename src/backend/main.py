@@ -89,6 +89,7 @@ LEAGUES_TTL_SECONDS = 300
 LEAGUE_TEAM_DETAILS_TTL_SECONDS = 300
 GAME_PLAYERS_TTL_SECONDS = 300
 TODAY_GAMES_TTL_SECONDS = 30
+STANDINGS_TTL_SECONDS = 300
 
 DB_CACHE_ENABLED = True
 logger.info("Database cache enabled using SQLAlchemy.")
@@ -612,6 +613,45 @@ def get_league_teams(league_id: str) -> dict:
         "source": SPORTS_DATA_SOURCE,
     }
     _cache_set_json(cache_key, response, LEAGUE_TEAMS_TTL_SECONDS)
+    return response
+
+
+@app.get("/api/leagues/{league_id}/standings")
+def get_league_standings(league_id: str) -> dict:
+    league_key = league_id.lower().strip()
+    config = LEAGUE_CONFIG.get(league_key)
+    if not config:
+        raise HTTPException(status_code=404, detail="League not found")
+
+    cache_key = f"league_standings:v1:espn:{league_key}"
+    cached_response = _cache_get_json(cache_key)
+    if isinstance(cached_response, dict):
+        return cached_response
+
+    connector = ESPNConnector(
+        league_name=config["name"],
+        timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+    )
+
+    try:
+        standings_data = connector.get_standings(season_type=2)
+        groups = connector.extract_standings_groups(standings_data)
+    except Exception as exc:
+        logger.warning(f"Failed to fetch standings for {league_key}: {exc}")
+        raise HTTPException(status_code=502, detail="Unable to fetch standings")
+
+    grouping_label = "Conference"
+    if config["name"] == "MLB":
+        grouping_label = "League"
+
+    response = {
+        "league_id": league_key,
+        "league": config["name"],
+        "grouping_label": grouping_label,
+        "groups": groups,
+        "source": "espn",
+    }
+    _cache_set_json(cache_key, response, STANDINGS_TTL_SECONDS)
     return response
 
 

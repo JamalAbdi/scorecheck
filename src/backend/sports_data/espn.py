@@ -89,6 +89,11 @@ class ESPNConnector(BaseSportDataConnector):
         league = self._path_info["league"]
         return f"/sports/{sport}/{league}/scoreboard"
 
+    def _standings_endpoint(self) -> str:
+        sport = self._path_info["sport"]
+        league = self._path_info["league"]
+        return f"/sports/{sport}/{league}/standings"
+
     def _all_teams(self) -> List[Dict[str, Any]]:
         data = self._get(self._teams_endpoint(), params={"limit": 200})
         sports = data.get("sports") if isinstance(data, dict) else None
@@ -207,6 +212,12 @@ class ESPNConnector(BaseSportDataConnector):
         data = self._get(self._scoreboard_endpoint(), params=params)
         events = data.get("events") if isinstance(data, dict) else None
         return {"events": events or []}
+
+    def get_standings(self, season_type: Optional[int] = 2) -> Json:
+        params: Dict[str, Any] = {}
+        if season_type is not None:
+            params["seasontype"] = season_type
+        return self._get(self._standings_endpoint(), params=params)
 
     def extract_team(self, data: Json) -> Optional[Dict[str, Any]]:
         response = data.get("response") if isinstance(data, dict) else None
@@ -523,3 +534,133 @@ class ESPNConnector(BaseSportDataConnector):
             )
 
         return games
+
+    def extract_standings_groups(self, data: Json) -> List[Dict[str, Any]]:
+        children = data.get("children") if isinstance(data, dict) else None
+        if not isinstance(children, list):
+            return []
+
+        def _logo_url(team: Dict[str, Any]) -> str:
+            logos = team.get("logos")
+            if isinstance(logos, list):
+                for logo in logos:
+                    if not isinstance(logo, dict):
+                        continue
+                    href = str(logo.get("href") or "").strip()
+                    if href:
+                        return href
+
+            direct_logo = str(team.get("logo") or "").strip()
+            if direct_logo:
+                return direct_logo
+
+            abbreviation = str(team.get("abbreviation") or "").strip().lower()
+            if abbreviation:
+                league_code = self._path_info.get("league", "")
+                return (
+                    f"https://a.espncdn.com/i/teamlogos/{league_code}/500/"
+                    f"{abbreviation}.png"
+                )
+            return ""
+
+        def _stat_value(stats: List[Dict[str, Any]], *names: str) -> str:
+            for name in names:
+                for stat in stats:
+                    if not isinstance(stat, dict):
+                        continue
+                    if str(stat.get("name") or "") != name:
+                        continue
+                    value = stat.get("displayValue")
+                    if value in (None, ""):
+                        value = stat.get("value")
+                    if value in (None, ""):
+                        continue
+                    return str(value)
+            return "-"
+
+        groups: List[Dict[str, Any]] = []
+
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+
+            standings = child.get("standings")
+            entries = standings.get("entries") if isinstance(standings, dict) else None
+            if not isinstance(entries, list):
+                continue
+
+            group_name = (
+                str(
+                    child.get("name")
+                    or child.get("shortName")
+                    or child.get("abbreviation")
+                    or "Standings"
+                )
+                .strip()
+            )
+
+            teams: List[Dict[str, Any]] = []
+            for index, entry in enumerate(entries):
+                if not isinstance(entry, dict):
+                    continue
+
+                team = entry.get("team")
+                if not isinstance(team, dict):
+                    continue
+
+                stats = (
+                    entry.get("stats")
+                    if isinstance(entry.get("stats"), list)
+                    else []
+                )
+
+                wins = _stat_value(stats, "wins")
+                losses = _stat_value(stats, "losses")
+                ot_losses = _stat_value(stats, "otLosses", "overtimeLosses", "ties")
+
+                record_parts = [wins, losses]
+                if ot_losses not in ("", "-"):
+                    record_parts.append(ot_losses)
+
+                teams.append(
+                    {
+                        "rank": index + 1,
+                        "team_id": str(team.get("id") or ""),
+                        "team_name": str(
+                            team.get("displayName") or team.get("name") or ""
+                        ).strip(),
+                        "team_abbreviation": str(
+                            team.get("abbreviation") or ""
+                        ).strip(),
+                        "team_logo": _logo_url(team),
+                        "record": "-".join(
+                            part for part in record_parts if part not in ("", "-")
+                        ),
+                        "wins": wins,
+                        "losses": losses,
+                        "ot_losses": "" if ot_losses == "-" else ot_losses,
+                        "win_percent": _stat_value(
+                            stats,
+                            "winPercent",
+                            "leagueWinPercent",
+                            "divisionWinPercent",
+                        ),
+                        "games_behind": _stat_value(
+                            stats,
+                            "gamesBehind",
+                            "divisionGamesBehind",
+                        ),
+                        "streak": _stat_value(stats, "streak"),
+                    }
+                )
+
+            groups.append(
+                {
+                    "id": str(child.get("id") or ""),
+                    "name": group_name,
+                    "abbreviation": str(child.get("abbreviation") or "").strip(),
+                    "teams": teams,
+                }
+            )
+
+        return groups

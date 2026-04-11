@@ -1,7 +1,10 @@
 <template>
 	<section class="home">
 		<div class="today-games">
-			<h3>Today's Games</h3>
+			<div class="section-heading-row">
+				<h3>{{ selectedLeagueName ? `${selectedLeagueName} Games` : "Today's Games" }}</h3>
+				<span v-if="selectedLeagueName" class="date-bubble">{{ selectedLeagueName }}</span>
+			</div>
 			<p v-if="loadingTodayGames">Loading games...</p>
 			<p v-else-if="todayGamesError" class="today-games-error">{{ todayGamesError }}</p>
 			<div v-else>
@@ -40,6 +43,49 @@
 									<span class="today-label">{{ gameStateLabel(game) }}</span>
 									<span v-if="!isCompletedStatus(game?.status)" class="today-time">{{ formatGameTime(game) }}</span>
 								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div v-if="selectedLeagueId" class="standings-section">
+					<div class="section-heading-row">
+						<h3 class="standings-heading">{{ standingsTitle }}</h3>
+					</div>
+					<p v-if="standingsLoading">Loading standings...</p>
+					<p v-else-if="standingsError" class="today-games-error">{{ standingsError }}</p>
+					<p v-else-if="standingsGroups.length === 0" class="today-empty">No standings available right now.</p>
+					<div v-else class="standings-groups">
+						<div v-for="group in standingsGroups" :key="group.id || group.name" class="standings-group">
+							<h4>{{ group.name }}</h4>
+							<div class="standings-table-wrap">
+								<table class="standings-table">
+									<thead>
+										<tr>
+											<th>Rank</th>
+											<th>Team</th>
+											<th>Record</th>
+											<th>PCT</th>
+											<th>GB</th>
+											<th>Streak</th>
+										</tr>
+									</thead>
+									<tbody>
+										<tr v-for="team in group.teams" :key="`${group.id || group.name}-${team.team_id || team.team_name}`">
+											<td>{{ team.rank }}</td>
+											<td class="standings-team-cell">
+												<div class="standings-team-link">
+													<img v-if="team.team_logo" :src="team.team_logo" :alt="`${team.team_name} logo`" class="standings-logo" />
+													<span>{{ displayTeamName(team.team_name) }}</span>
+												</div>
+											</td>
+											<td>{{ formatStandingsRecord(team) }}</td>
+											<td>{{ formatWinPercent(team.win_percent) }}</td>
+											<td>{{ team.games_behind || '-' }}</td>
+											<td>{{ team.streak || '-' }}</td>
+										</tr>
+									</tbody>
+								</table>
 							</div>
 						</div>
 					</div>
@@ -100,14 +146,43 @@ export default {
 </script>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 const apiUrl = process.env.VUE_APP_API_URL || '/api'
+const route = useRoute()
 const loadingTodayGames = ref(true)
 const todayGamesError = ref('')
 const todayGamesPayload = ref({})
 const teamsByLeague = ref({})
+const standingsGroups = ref([])
+const standingsLoading = ref(false)
+const standingsError = ref('')
+const standingsGroupingLabel = ref('Conference')
 let todayGamesIntervalId = null
+
+const LEAGUE_NAMES = {
+	nba: 'NBA',
+	nhl: 'NHL',
+	mlb: 'MLB',
+}
+
+const selectedLeagueId = computed(() => {
+	const raw = String(route.query?.league || '').toLowerCase().trim()
+	if (Object.prototype.hasOwnProperty.call(LEAGUE_NAMES, raw)) {
+		return raw
+	}
+	return ''
+})
+
+const selectedLeagueName = computed(() => LEAGUE_NAMES[selectedLeagueId.value] || '')
+
+const standingsTitle = computed(() => {
+	if (!selectedLeagueName.value) {
+		return ''
+	}
+	return `${selectedLeagueName.value} ${standingsGroupingLabel.value} Standings`
+})
 
 const normalizeLeagues = (value) => {
 	if (!Array.isArray(value)) {
@@ -132,11 +207,21 @@ const yesterdayLeagues = computed(() => {
 	return []
 })
 
+const filterLeaguesBySelection = (leagues) => {
+	if (!selectedLeagueId.value) {
+		return leagues
+	}
+	return leagues.filter((league) => league?.id === selectedLeagueId.value)
+}
+
+const filteredTodayLeagues = computed(() => filterLeaguesBySelection(todayLeagues.value))
+const filteredYesterdayLeagues = computed(() => filterLeaguesBySelection(yesterdayLeagues.value))
+
 const totalGames = (leagues) => leagues
 	.reduce((count, league) => count + (Array.isArray(league.games) ? league.games.length : 0), 0)
 
-const hasNoTodayGames = computed(() => totalGames(todayLeagues.value) === 0)
-const hasAnyYesterdayGames = computed(() => totalGames(yesterdayLeagues.value) > 0)
+const hasNoTodayGames = computed(() => totalGames(filteredTodayLeagues.value) === 0)
+const hasAnyYesterdayGames = computed(() => totalGames(filteredYesterdayLeagues.value) > 0)
 
 const formatGameTime = (game) => {
 	const rawStart = game?.start_time
@@ -237,8 +322,8 @@ const sortLeaguesForDisplay = (leagues) => leagues.map((league) => ({
 	games: sortGamesForDisplay(league.games),
 }))
 
-const sortedTodayLeagues = computed(() => sortLeaguesForDisplay(todayLeagues.value))
-const sortedYesterdayLeagues = computed(() => sortLeaguesForDisplay(yesterdayLeagues.value))
+const sortedTodayLeagues = computed(() => sortLeaguesForDisplay(filteredTodayLeagues.value))
+const sortedYesterdayLeagues = computed(() => sortLeaguesForDisplay(filteredYesterdayLeagues.value))
 
 const displayTeamScore = (game, side) => {
 	if (!isCompletedStatus(game?.status) && !isLiveStatus(game?.status)) {
@@ -287,6 +372,40 @@ const displayTeamName = (teamName) => {
 	return teamName
 }
 
+const formatWinPercent = (value) => {
+	const text = String(value ?? '').trim()
+	if (!text || text === '-') {
+		return '-'
+	}
+	if (text.startsWith('.')) {
+		return text
+	}
+
+	const parsed = Number.parseFloat(text)
+	if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+		return parsed.toFixed(3).replace(/^0/, '')
+	}
+
+	return text
+}
+
+const formatStandingsRecord = (team) => {
+	const rawRecord = String(team?.record || '').trim()
+	if (rawRecord) {
+		return rawRecord
+	}
+
+	const wins = String(team?.wins || '-').trim() || '-'
+	const losses = String(team?.losses || '-').trim() || '-'
+	const otLosses = String(team?.ot_losses || '').trim()
+
+	if (otLosses) {
+		return `${wins}-${losses}-${otLosses}`
+	}
+
+	return `${wins}-${losses}`
+}
+
 const loadLeagueTeams = async () => {
 	const leagues = ['nba', 'nhl', 'mlb']
 	const next = {}
@@ -306,6 +425,38 @@ const loadLeagueTeams = async () => {
 	}
 
 	teamsByLeague.value = next
+}
+
+const loadStandings = async () => {
+	if (!selectedLeagueId.value) {
+		standingsGroups.value = []
+		standingsLoading.value = false
+		standingsError.value = ''
+		standingsGroupingLabel.value = 'Conference'
+		return
+	}
+
+	standingsLoading.value = true
+	standingsError.value = ''
+	standingsGroups.value = []
+
+	try {
+		const response = await fetch(`${apiUrl}/leagues/${selectedLeagueId.value}/standings?t=${Date.now()}`, {
+			cache: 'no-store',
+		})
+		if (!response.ok) {
+			throw new Error(`API error: ${response.status}`)
+		}
+
+		const data = await response.json()
+		standingsGroups.value = Array.isArray(data.groups) ? data.groups : []
+		standingsGroupingLabel.value = String(data.grouping_label || 'Conference')
+	} catch {
+		standingsGroups.value = []
+		standingsError.value = 'Unable to load standings right now.'
+	} finally {
+		standingsLoading.value = false
+	}
 }
 
 const loadTodayGames = async ({ silent = false } = {}) => {
@@ -339,6 +490,14 @@ onMounted(async () => {
 		loadTodayGames({ silent: true })
 	}, 30000)
 })
+
+watch(
+	() => selectedLeagueId.value,
+	() => {
+		loadStandings()
+	},
+	{ immediate: true },
+)
 
 onUnmounted(() => {
 	if (todayGamesIntervalId) {
@@ -397,6 +556,62 @@ onUnmounted(() => {
 	background: #f9fafb;
 }
 
+.standings-section {
+	margin-top: 28px;
+	padding: 16px;
+	border: 1px solid #e5e7eb;
+	border-radius: 14px;
+	background: #f9fafb;
+}
+
+.standings-heading {
+	margin: 0;
+}
+
+.standings-groups {
+	display: grid;
+	gap: 14px;
+}
+
+.standings-group h4 {
+	margin: 0 0 8px;
+}
+
+.standings-table-wrap {
+	overflow-x: auto;
+}
+
+.standings-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.standings-table th,
+.standings-table td {
+	text-align: left;
+	padding: 7px 6px;
+	border-bottom: 1px solid #e5e7eb;
+	white-space: nowrap;
+}
+
+.standings-team-cell {
+	min-width: 170px;
+}
+
+.standings-team-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: #111827;
+}
+
+.standings-logo {
+	width: 18px;
+	height: 18px;
+	object-fit: contain;
+}
+
 .today-games-error {
 	color: #b91c1c;
 }
@@ -441,7 +656,7 @@ onUnmounted(() => {
 
 .team-row {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 36px;
+	grid-template-columns: minmax(0, 1fr) max-content;
 	align-items: flex-start;
 	gap: 18px;
 	width: 100%;
@@ -480,12 +695,14 @@ onUnmounted(() => {
 	font-size: 18px;
 	font-weight: 700;
 	color: #111827;
-	width: 36px;
+	min-width: 36px;
+	width: auto;
 	text-align: right;
 	justify-self: end;
 	font-variant-numeric: tabular-nums;
 	line-height: 1;
 	padding-top: 1px;
+	white-space: nowrap;
 }
 
 .today-team-link:hover {
@@ -524,16 +741,66 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
+	.home {
+		padding: 16px 10px;
+	}
+
+	.yesterday-section {
+		margin-top: 20px;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
+	.standings-section {
+		margin-top: 20px;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
 	.today-list {
 		grid-template-columns: 1fr;
 	}
 
 	.today-game {
-		grid-template-columns: minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1fr) 74px;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 10px;
+	}
+
+	.team-row {
+		gap: 8px;
+	}
+
+	.today-team-link {
+		column-gap: 4px;
+	}
+
+	.team-text strong {
+		white-space: normal;
+		overflow: visible;
+		text-overflow: clip;
+		line-height: 1.15;
+	}
+
+	.team-score {
+		min-width: 0;
+		font-size: 17px;
 	}
 
 	.today-status {
-		width: auto;
+		width: 74px;
+		justify-content: center;
+	}
+
+	.today-label,
+	.today-time,
+	.today-date {
+		white-space: nowrap;
 	}
 }
 </style>

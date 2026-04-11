@@ -291,5 +291,24 @@ body {
   flex: 1;
   padding: 24px 32px 48px;
 }
+
+@media (max-width: 900px) {
+  .header {
+    padding: 14px 10px 10px;
+  }
+
+  .header h1 {
+    font-size: 30px;
+  }
+
+  .league-bar {
+    margin-top: 12px;
+    padding: 0 10px;
+  }
+
+  .content {
+    padding: 12px 10px 28px;
+  }
+}
 </style>
 
